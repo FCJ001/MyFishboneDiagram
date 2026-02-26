@@ -4,6 +4,7 @@ import { Graph } from '@antv/x6'
 
 const containerRef = ref(null)
 const scrollRef = ref(null)
+const sizerRef = ref(null)
 let graph = null
 const callbackMap = {}
 
@@ -21,17 +22,23 @@ function onOverlayBlur(overlay) {
   renderGraph()
 }
 
+function rebalanceSides(arr, key, values) {
+  arr.forEach((item, i) => { item[key] = values[i % values.length] })
+}
+
 function deleteBone(delInfo) {
   if (!delInfo) return
   const { type, bigId, midId, smId } = delInfo
   if (type === 'big') {
     const idx = fishData.bigBones.findIndex((b) => b.id === bigId)
     if (idx >= 0) fishData.bigBones.splice(idx, 1)
+    rebalanceSides(fishData.bigBones, 'position', ['top', 'bottom'])
   } else if (type === 'mid') {
     const big = fishData.bigBones.find((b) => b.id === bigId)
     if (!big) return
     const idx = big.midBones.findIndex((m) => m.id === midId)
     if (idx >= 0) big.midBones.splice(idx, 1)
+    rebalanceSides(big.midBones, 'side', ['left', 'right'])
   } else if (type === 'small') {
     const big = fishData.bigBones.find((b) => b.id === bigId)
     if (!big) return
@@ -39,6 +46,7 @@ function deleteBone(delInfo) {
     if (!mid) return
     const idx = mid.smallBones.findIndex((s) => s.id === smId)
     if (idx >= 0) mid.smallBones.splice(idx, 1)
+    rebalanceSides(mid.smallBones, 'position', ['top', 'bottom'])
   }
   renderGraph()
 }
@@ -47,6 +55,7 @@ function deleteBone(delInfo) {
 let idSeq = 0
 const genId = () => `n_${++idSeq}`
 const fishData = reactive({ bigBones: [] })
+const headLabel = ref('问题')
 
 function addBigBone() {
   const n = fishData.bigBones.length
@@ -86,6 +95,10 @@ function addSmallBone(bigId, midId) {
   renderGraph()
 }
 
+// ======================== 鱼头鱼尾位置(由 renderGraph 更新) ========================
+const headPos = reactive({ x: 0, y: 0, w: 0, h: 0 })
+const tailPos = reactive({ x: 0, y: 0, w: 0, h: 0 })
+
 // ======================== 布局参数 ========================
 const CY = 350
 const TAIL = 50
@@ -113,15 +126,19 @@ function addEdge(s, t, color, w) {
 }
 
 function addLabelNode(id, x, y, w, h, text, bg, border, fg, fs = 12, fw = 500, rx = 4, boneRef = null, delInfo = null) {
+  const boneType = delInfo?.type || ''
   if (mode.value === 'edit' && boneRef) {
-    editOverlays.value.push({ id, x, y, w, h, boneRef, bg, border, fg, fs, fw, rx, delInfo })
+    editOverlays.value.push({ id, x, y, w, h, boneRef, bg, border, fg, fs, fw, rx, delInfo, boneType })
   } else {
     graph.addNode({
       id,
       shape: 'rect', x, y, width: w, height: h,
       attrs: {
         body: { fill: bg, stroke: border, strokeWidth: 1.2, rx, ry: rx },
-        label: { text, fill: fg, fontSize: fs, fontWeight: fw },
+        label: {
+          text, fill: fg, fontSize: fs, fontWeight: fw,
+          textWrap: { width: w - 12, height: h, ellipsis: true },
+        },
       },
     })
   }
@@ -134,7 +151,7 @@ function addBtn(id, x, y, color, tip, fn, size) {
   graph.addNode({
     id, shape: 'rect', x, y, width: s, height: s,
     attrs: {
-      body: { fill: color, stroke: '#fff', strokeWidth: 1.5, rx: s / 2, ry: s / 2, cursor: 'pointer' },
+      body: { fill: color, stroke: '#fff', strokeWidth: 1.5, rx: 4, ry: 4, cursor: 'pointer' },
       label: { text: '+', fill: '#fff', fontSize: s === BTN ? 16 : 13, fontWeight: 'bold', cursor: 'pointer' },
     },
   })
@@ -182,7 +199,9 @@ function renderGraph() {
     cx -= w
     return { b, x: cx + w / 2, w }
   })
-  const canvasW = Math.max(mainEnd + 100, 900)
+  const wrapW = wrap.clientWidth
+  const wrapH = wrap.clientHeight
+  const canvasW = Math.max(mainEnd + 100, wrapW)
 
   let yMin = CY, yMax = CY
   for (const sl2 of slots) {
@@ -192,7 +211,10 @@ function renderGraph() {
     yMin = Math.min(yMin, ey - 80)
     yMax = Math.max(yMax, ey + 80)
   }
-  const canvasH = Math.max(yMax - yMin + 200, 700)
+  const canvasH = Math.max(yMax - yMin + 200, wrapH)
+
+  sizerRef.value.style.width = canvasW + 'px'
+  sizerRef.value.style.height = canvasH + 'px'
 
   graph = new Graph({
     container: containerRef.value,
@@ -210,15 +232,23 @@ function renderGraph() {
     if (fn) fn()
   })
 
-  // 鱼尾
-  addEdge([PAD_L, CY - 26], [PAD_L + TAIL, CY], '#165DFF', 2.5)
-  addEdge([PAD_L, CY + 26], [PAD_L + TAIL, CY], '#165DFF', 2.5)
-  addEdge([PAD_L + TAIL, CY], [mainEnd, CY], '#165DFF', 3)
-  addEdge([mainEnd, CY - 24], [mainEnd + 48, CY], '#165DFF', 3)
-  addEdge([mainEnd, CY + 24], [mainEnd + 48, CY], '#165DFF', 3)
-  addEdge([mainEnd, CY - 24], [mainEnd, CY + 24], '#165DFF', 3)
+  const TAIL_W = 80, TAIL_H = 60
+  const HEAD_W = 100, HEAD_H = 60
 
-  addBtn('btn_add_big', PAD_L + TAIL + 14, CY - BTN / 2, '#165DFF', '新增大骨', addBigBone)
+  tailPos.x = PAD_L - 10
+  tailPos.y = CY - TAIL_H / 2
+  tailPos.w = TAIL_W
+  tailPos.h = TAIL_H
+
+  headPos.x = mainEnd - 10
+  headPos.y = CY - HEAD_H / 2
+  headPos.w = HEAD_W
+  headPos.h = HEAD_H
+
+  // 主骨线（从鱼尾区域右侧到鱼头区域左侧）
+  addEdge([tailPos.x + TAIL_W, CY], [headPos.x, CY], '#0FC6C2', 3)
+
+  addBtn('btn_add_big', tailPos.x + TAIL_W + 6, CY - BTN / 2, '#165DFF', '新增大骨', addBigBone)
 
   let btnSeq = 0
 
@@ -231,11 +261,11 @@ function renderGraph() {
     const ex = bx - dd, ey = CY + dir * dd
 
     // 大骨标签（可点击编辑）
-    const lw = 96, lh = 32
+    const lw = 120, lh = 32
     const boxX = ex - lw / 2
     const boxY = dir === -1 ? ey - lh : ey
     const bigLabelId = `big_label_${b.id}`
-    addLabelNode(bigLabelId, boxX, boxY, lw, lh, b.label, '#E8F7FF', '#0FC6C2', '#0A7B79', 13, 600, 6, b, { type: 'big', bigId: b.id })
+    addLabelNode(bigLabelId, boxX, boxY, lw, lh, b.label, '#FFFFFF', '#1D2129', '#1D2129', 13, 600, 8, b, { type: 'big', bigId: b.id })
 
     addEdge([ex, ey], [sx, sy], '#0FC6C2', 2)
 
@@ -245,7 +275,7 @@ function renderGraph() {
     // 按钮在远离主骨的方框端附近
     const mbx = ex + (sx - ex) * btnT
     const mby = ey + (sy - ey) * btnT
-    addBtn(`btn_mid_${b.id}`, mbx - MID_BTN / 2, mby - MID_BTN / 2, '#0FC6C2', '新增中骨', () => addMidBone(bid), MID_BTN)
+    addBtn(`btn_mid_${b.id}`, mbx - MID_BTN / 2, mby - MID_BTN / 2, '#165DFF', '新增中骨', () => addMidBone(bid), MID_BTN)
 
     // 中骨从主骨端向方框端方向排列
     let accumOffset = 40 // 主骨端留白
@@ -263,18 +293,18 @@ function renderGraph() {
       const mex = ax + msign * dynamicMidLen
       const mey = ay
 
-      addEdge([ax, ay], [mex, mey], '#FF7D00', 1.5)
+      addEdge([ax, ay], [mex, mey], '#0FC6C2', 1.5)
 
       // 中骨标签（可点击编辑）
-      const mlw = 64, mlh = 24
+      const mlw = 80, mlh = 24
       const midLabelId = `mid_label_${m.id}`
-      addLabelNode(midLabelId, mex + (msign === 1 ? 4 : -mlw - 4), mey - mlh / 2, mlw, mlh, m.label, '#FFF7E8', '#FF7D00', '#D25F00', 11, 500, 4, m, { type: 'mid', bigId: b.id, midId: m.id })
+      addLabelNode(midLabelId, mex + (msign === 1 ? 4 : -mlw - 4), mey - mlh / 2, mlw, mlh, m.label, '#E8F3FF', '#165DFF', '#1D2129', 11, 500, 4, m, { type: 'mid', bigId: b.id, midId: m.id })
 
       const capMid = m.id
       const SM_BTN = 18
       const btnGap = 20
       const smBtnX = mex + (msign === 1 ? -SM_BTN - btnGap : btnGap)
-      addBtn(`btn_sm_${++btnSeq}`, smBtnX, mey - SM_BTN / 2, '#FF7D00', '新增小骨', () => addSmallBone(bid, capMid), SM_BTN)
+      addBtn(`btn_sm_${++btnSeq}`, smBtnX, mey - SM_BTN / 2, '#165DFF', '新增小骨', () => addSmallBone(bid, capMid), SM_BTN)
 
       const smdd = SM_LEN / Math.SQRT2
       // 小骨区间整体向远离大骨线方向偏移，拉开与大骨线的距离
@@ -289,12 +319,12 @@ function renderGraph() {
         const smEndX = smx - smdd
         const smEndY = smy + sd * smdd
 
-        addEdge([smx, smy], [smEndX, smEndY], '#86909C', 1)
+        addEdge([smx, smy], [smEndX, smEndY], '#0FC6C2', 1)
 
         // 小骨标签（可点击编辑）
-        const slw = 52, slh = 18
+        const slw = 64, slh = 18
         const smLabelId = `sm_label_${sm.id}`
-        addLabelNode(smLabelId, smEndX - slw / 2, smEndY + (sd === 1 ? 3 : -slh - 3), slw, slh, sm.label, '#F2F3F5', '#C9CDD4', '#4E5969', 10, 400, 3, sm, { type: 'small', bigId: b.id, midId: m.id, smId: sm.id })
+        addLabelNode(smLabelId, smEndX - slw / 2, smEndY + (sd === 1 ? 3 : -slh - 3), slw, slh, sm.label, 'transparent', 'transparent', '#4E5969', 10, 400, 3, sm, { type: 'small', bigId: b.id, midId: m.id, smId: sm.id })
       }
     }
   }
@@ -327,11 +357,55 @@ onMounted(async () => {
       </a-space>
     </header>
     <div class="fishbone-scroll" ref="scrollRef">
+      <div class="fishbone-sizer" ref="sizerRef"></div>
       <div class="fishbone-canvas" ref="containerRef" />
+
+      <!-- 鱼尾 overlay -->
+      <div
+        class="fish-part"
+        :style="{
+          left: tailPos.x + 'px',
+          top: tailPos.y + 'px',
+          width: tailPos.w + 'px',
+          height: tailPos.h + 'px',
+        }"
+      >
+        <svg viewBox="0 0 80 60" class="fish-part-svg">
+          <polygon points="0,0 80,30 0,60" fill="#0FC6C2" opacity="0.15" />
+          <polyline points="0,0 80,30 0,60" fill="none" stroke="#0FC6C2" stroke-width="2.5" stroke-linejoin="round" />
+        </svg>
+      </div>
+
+      <!-- 鱼头 overlay -->
+      <div
+        class="fish-part"
+        :style="{
+          left: headPos.x + 'px',
+          top: headPos.y + 'px',
+          width: headPos.w + 'px',
+          height: headPos.h + 'px',
+        }"
+      >
+        <svg viewBox="0 0 100 60" class="fish-part-svg">
+          <path d="M0,0 L0,60 L85,60 Q100,30 85,0 Z" fill="#0FC6C2" opacity="0.15" />
+          <path d="M0,0 L0,60 L85,60 Q100,30 85,0 Z" fill="none" stroke="#0FC6C2" stroke-width="2.5" stroke-linejoin="round" />
+        </svg>
+        <div class="fish-head-label">
+          <input
+            v-if="mode === 'edit'"
+            class="fish-head-input"
+            :value="headLabel"
+            :title="headLabel"
+            @input="e => headLabel = e.target.value"
+          />
+          <span v-else class="fish-head-text" :title="headLabel">{{ headLabel }}</span>
+        </div>
+      </div>
+
       <div
         v-for="ov in editOverlays"
         :key="ov.id"
-        class="inline-edit-wrap"
+        :class="['inline-edit-wrap', 'inline-edit-' + ov.boneType]"
         :style="{
           left: ov.x + 'px',
           top: ov.y + 'px',
@@ -350,6 +424,7 @@ onMounted(async () => {
             borderRadius: ov.rx + 'px',
           }"
           :value="ov.boneRef.label"
+          :title="ov.boneRef.label"
           @input="e => ov.boneRef.label = e.target.value"
           @blur="onOverlayBlur(ov)"
         />
@@ -391,10 +466,59 @@ onMounted(async () => {
   overflow: auto;
   position: relative;
 }
+.fishbone-sizer {
+  pointer-events: none;
+}
 .fishbone-canvas {
-  display: inline-block;
-  min-width: 100%;
-  min-height: 100%;
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+.fish-part {
+  position: absolute;
+  z-index: 8;
+}
+.fish-part-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.fish-head-label {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+.fish-head-input {
+  pointer-events: auto;
+  width: 80%;
+  text-align: center;
+  border: none;
+  background: transparent;
+  font-size: 14px;
+  font-weight: 600;
+  color: #0A7B79;
+  outline: none;
+  padding: 2px 4px;
+  border-radius: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fish-head-input:focus {
+  background: rgba(255,255,255,0.8);
+  box-shadow: 0 0 0 2px rgba(15,198,194,0.25);
+}
+.fish-head-text {
+  font-size: 14px;
+  font-weight: 600;
+  color: #0A7B79;
+  max-width: 80%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .inline-edit-wrap {
   position: absolute;
@@ -408,9 +532,18 @@ onMounted(async () => {
   text-align: center;
   outline: none;
   box-sizing: border-box;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .inline-edit-input:focus {
   box-shadow: 0 0 0 2px rgba(22,93,255,0.2);
+}
+.inline-edit-big:hover .inline-edit-input {
+  border-color: #165DFF;
+}
+.inline-edit-mid:hover .inline-edit-input {
+  border-color: transparent;
 }
 .inline-edit-del {
   position: absolute;
