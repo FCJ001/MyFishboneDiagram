@@ -27,18 +27,20 @@ const worldRef = ref(null)     // 内层世界容器（transform 平移）
 let graph = null               // AntV X6 Graph 实例（每次 renderGraph 会重建）
 const callbackMap = {}         // 节点 id → 点击回调的映射表（用于 "+" 按钮）
 
-// ============================== 拖拽平移 ==============================
+// ============================== 拖拽平移 + 滚轮缩放 ==============================
 const panX = ref(0)
 const panY = ref(0)
+const scale = ref(1)
+const SCALE_MIN = 0.3
+const SCALE_MAX = 2
 let isPanning = false
 let panStartX = 0
 let panStartY = 0
 let panOriginX = 0
 let panOriginY = 0
-let didDrag = false // 区分拖拽和点击
+let didDrag = false
 
 function onPointerDown(e) {
-  // 不拦截 input / 按钮上的事件
   if (e.target.closest('.inline-edit-wrap') || e.target.closest('.fish-head-input')) return
   isPanning = true
   didDrag = false
@@ -62,6 +64,21 @@ function onPointerUp() {
   if (!isPanning) return
   isPanning = false
   if (viewportRef.value) viewportRef.value.style.cursor = ''
+}
+
+function onWheel(e) {
+  e.preventDefault()
+  const rect = viewportRef.value.getBoundingClientRect()
+  // 鼠标在视口内的坐标
+  const mx = e.clientX - rect.left
+  const my = e.clientY - rect.top
+  const oldScale = scale.value
+  const delta = e.deltaY > 0 ? -0.08 : 0.08
+  const newScale = Math.min(SCALE_MAX, Math.max(SCALE_MIN, oldScale + delta))
+  // 以鼠标位置为锚点：缩放前后鼠标指向的世界坐标不变
+  panX.value = mx - (mx - panX.value) * (newScale / oldScale)
+  panY.value = my - (my - panY.value) * (newScale / oldScale)
+  scale.value = newScale
 }
 
 // ============================== 模式切换 ==============================
@@ -430,7 +447,8 @@ function renderGraph() {
     }
   }
 
-  // --- 7. 内容居中：画布小于视口时居中，大于视口时从原点开始 ---
+  // --- 7. 重置缩放，内容居中 ---
+  scale.value = 1
   nextTick(() => {
     if (!viewportRef.value) return
     const vw = viewportRef.value.clientWidth
@@ -467,20 +485,26 @@ onBeforeUnmount(() => {
         <a-tag color="arcoblue">大骨 {{ fishData.bigBones.length }}</a-tag>
         <a-tag color="cyan">中骨 {{ fishData.bigBones.reduce((a, b) => a + b.midBones.length, 0) }}</a-tag>
         <a-tag color="orangered">小骨 {{ fishData.bigBones.reduce((a, b) => a + b.midBones.reduce((c, m) => c + m.smallBones.length, 0), 0) }}</a-tag>
+        <span class="zoom-ctrl">
+          <button class="zoom-btn" @click="scale = Math.max(SCALE_MIN, scale - 0.1)">−</button>
+          <span class="zoom-val" @click="scale = 1; renderGraph()">{{ Math.round(scale * 100) }}%</span>
+          <button class="zoom-btn" @click="scale = Math.min(SCALE_MAX, scale + 0.1)">+</button>
+        </span>
       </a-space>
     </header>
 
-    <!-- 视口: 裁剪溢出，捕获拖拽 -->
+    <!-- 视口: 裁剪溢出，捕获拖拽和滚轮缩放 -->
     <div
       class="fishbone-viewport"
       ref="viewportRef"
       @pointerdown="onPointerDown"
+      @wheel.prevent="onWheel"
     >
-      <!-- 世界容器: 通过 transform 平移，所有内容都在里面 -->
+      <!-- 世界容器: translate 平移 + scale 缩放 -->
       <div
         class="fishbone-world"
         ref="worldRef"
-        :style="{ transform: `translate(${panX}px, ${panY}px)` }"
+        :style="{ transform: `translate(${panX}px, ${panY}px) scale(${scale})` }"
       >
         <!-- X6 画布 -->
         <div class="fishbone-canvas" ref="containerRef" />
@@ -591,6 +615,43 @@ onBeforeUnmount(() => {
   color: #1d2129;
   letter-spacing: .5px;
 }
+.zoom-ctrl {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 8px;
+  background: #f2f3f5;
+  border-radius: 6px;
+  padding: 2px 4px;
+}
+.zoom-btn {
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  border-radius: 4px;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  color: #4e5969;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.zoom-btn:hover {
+  background: #e5e6eb;
+}
+.zoom-val {
+  min-width: 42px;
+  text-align: center;
+  font-size: 12px;
+  color: #1d2129;
+  cursor: pointer;
+  user-select: none;
+}
+.zoom-val:hover {
+  color: #165DFF;
+}
 
 /* ==================== 视口 + 世界容器 ==================== */
 .fishbone-viewport {
@@ -604,7 +665,8 @@ onBeforeUnmount(() => {
   position: absolute;
   top: 0;
   left: 0;
-  will-change: transform; /* GPU 加速 */
+  transform-origin: 0 0;
+  will-change: transform;
 }
 .fishbone-canvas {
   /* X6 画布，由 Graph 设置宽高 */
