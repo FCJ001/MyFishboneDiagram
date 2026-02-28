@@ -32,12 +32,28 @@ import { IconZoomIn, IconZoomOut, IconOriginalSize } from '@arco-design/web-vue/
 // ═══════════════════════════════════════════════════════════
 const emit = defineEmits(['confirm', 'cancel'])
 
+const loading = ref(false)
+
 /**
- * 初始化入口 —— 父组件调用 ref.init() 触发首次渲染。
- * 会等待 DOM 挂载完成后再执行 renderGraph()。
+ * 初始化入口 —— 父组件调用 ref.init(dataOrPromise?) 触发渲染。
+ * @param {Object|Promise|Function} [dataOrPromise]
+ *   - 不传：渲染空图
+ *   - 传对象：直接填充数据并渲染
+ *   - 传 Promise / async 函数：先显示 loading，数据返回后渲染
  */
-function init() {
+async function init(dataOrPromise) {
   needsCenter = true
+  if (dataOrPromise && (typeof dataOrPromise === 'function' || typeof dataOrPromise.then === 'function')) {
+    loading.value = true
+    try {
+      const result = typeof dataOrPromise === 'function' ? await dataOrPromise() : await dataOrPromise
+      if (result) setData(result)
+    } finally {
+      loading.value = false
+    }
+  } else if (dataOrPromise) {
+    setData(dataOrPromise)
+  }
   const tryRender = () => {
     const c = containerRef.value
     const vp = viewportRef.value
@@ -50,7 +66,62 @@ function init() {
   nextTick(tryRender)
 }
 
-defineExpose({ init })
+/**
+ * 从外部数据填充鱼骨图。
+ * 会自动生成 id、分配 position，外部只需提供 label。
+ */
+function setData(data) {
+  idSeq = 0
+  fishData.bigBones = []
+  if (data.headLabel) headLabel.value = data.headLabel
+  if (Array.isArray(data.bigBones)) {
+    data.bigBones.forEach((bigItem, i) => {
+      const big = {
+        id: genId(),
+        label: bigItem.label || `大骨 ${i + 1}`,
+        position: i % 2 === 0 ? 'top' : 'bottom',
+        midBones: [],
+      }
+      if (Array.isArray(bigItem.midBones)) {
+        bigItem.midBones.forEach((midItem, j) => {
+          const mid = {
+            id: genId(),
+            label: midItem.label || `中骨 ${j + 1}`,
+            smallBones: [],
+          }
+          if (Array.isArray(midItem.smallBones)) {
+            midItem.smallBones.forEach((smItem, k) => {
+              mid.smallBones.push({
+                id: genId(),
+                label: smItem.label || `小骨 ${k + 1}`,
+              })
+            })
+          }
+          big.midBones.push(mid)
+        })
+      }
+      fishData.bigBones.push(big)
+    })
+  }
+}
+
+/**
+ * 获取当前鱼骨图的纯数据（不含 id/position，可用于持久化）。
+ */
+function getData() {
+  return {
+    headLabel: headLabel.value,
+    bigBones: fishData.bigBones.map(b => ({
+      label: b.label,
+      midBones: b.midBones.map(m => ({
+        label: m.label,
+        smallBones: m.smallBones.map(s => ({ label: s.label })),
+      })),
+    })),
+  }
+}
+
+defineExpose({ init, setData, getData })
 
 // ═══════════════════════════════════════════════════════════
 // 2. DOM 引用 & X6 实例
@@ -134,7 +205,7 @@ const LINE_CHARS = 10            // 每行最多字符数（超过则换行）
 /** 根据文本长度计算方框宽度（至少 minW，最多 LINE_CHARS 个字） */
 function calcBoxW(text, minW, fs = 11) {
   const len = text.length
-  const lineW = Math.min(len, LINE_CHARS) * (fs * 0.7) + 24
+  const lineW = Math.min(len, LINE_CHARS) * (fs * 1.1) + 24
   return Math.max(minW, lineW)
 }
 
@@ -244,6 +315,8 @@ const fishData = reactive({ bigBones: [] })
 const headLabel = ref('问题详情')
 const headHovering = ref(false)
 const headInputRef = ref(null)
+const headFontSize = ref(16)      // 随鱼头缩放动态调整
+const headTextWidth = ref(72)     // 随鱼头缩放动态调整
 
 function onHeadMouseEnter() {
   if (mode.value !== 'edit') return
@@ -689,6 +762,10 @@ function renderGraph() {
   const TAIL_SVG_W = 120 * FISH_SCALE, TAIL_SVG_H = 120 * FISH_SCALE
   const HEAD_SVG_W = 120 * FISH_SCALE, HEAD_SVG_H = 120 * FISH_SCALE
 
+  // 鱼头文字尺寸随缩放联动
+  headFontSize.value = Math.round(16 * (FISH_SCALE / FISH_SCALE_BASE))
+  headTextWidth.value = Math.round(72 * (FISH_SCALE / FISH_SCALE_BASE))
+
   // ─────────────────────────────────────
   // 11f. 创建 X6 Graph 实例
   // ─────────────────────────────────────
@@ -761,10 +838,11 @@ function renderGraph() {
 
     addEdge([sx, sy], [ex, ey], boneColor, 2)
 
-    // 新增中骨按钮（靠近主骨交点侧）
+    // 新增中骨按钮（靠近主骨交点侧，距离随斜线长度动态调整）
     const bid = b.id
     const MID_BTN = 20
-    const btnT = 40 / dynamicDiag
+    const btnDist = Math.min(40 + dynamicDiag * 0.06, 80)
+    const btnT = btnDist / dynamicDiag
     const mbx = sx + (ex - sx) * btnT
     const mby = sy + (ey - sy) * btnT
     addBtn(`btn_mid_${b.id}`, mbx - MID_BTN / 2, mby - MID_BTN / 2, boneColor, '新增中骨', () => addMidBone(bid), MID_BTN)
@@ -894,6 +972,10 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="fishbone-page">
+    <!-- 加载遮罩 -->
+    <div v-if="loading" class="fishbone-loading">
+      <a-spin tip="加载中..." />
+    </div>
     <!-- 视口：负责裁剪和接收鼠标事件 -->
     <div
       class="fishbone-viewport"
@@ -971,12 +1053,17 @@ onBeforeUnmount(() => {
               v-if="headHovering && mode === 'edit'"
               ref="headInputRef"
               class="fish-head-input"
+              :style="{ width: headTextWidth + 'px', fontSize: headFontSize + 'px' }"
               :value="headLabel"
               :maxlength="MAX_CHARS"
               @input="onHeadInput"
               @blur="onHeadMouseLeave"
             />
-            <span v-else class="fish-head-text">{{ headLabel }}</span>
+            <span
+              v-else
+              class="fish-head-text"
+              :style="{ width: headTextWidth + 'px', fontSize: headFontSize + 'px' }"
+            >{{ headLabel }}</span>
           </div>
         </div>
 
@@ -1072,6 +1159,17 @@ onBeforeUnmount(() => {
   position: relative;
 }
 
+/* ==================== 加载遮罩 ==================== */
+.fishbone-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.7);
+}
+
 /* ==================== 右上角缩放百分比 ==================== */
 .scale-text {
   position: absolute;
@@ -1160,8 +1258,6 @@ onBeforeUnmount(() => {
   box-sizing: border-box;
 }
 .fish-head-text {
-  width: 72px;
-  font-size: 16px;
   font-weight: 600;
   color: #fff;
   text-align: center;
@@ -1175,11 +1271,9 @@ onBeforeUnmount(() => {
 }
 .fish-head-input {
   pointer-events: auto;
-  width: 72px;
   text-align: center;
   border: none;
   background: transparent;
-  font-size: 16px;
   font-weight: 600;
   color: #fff;
   outline: none;
