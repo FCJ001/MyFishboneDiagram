@@ -14,7 +14,6 @@ export const PAIR_GAP  = 60    // 同组上下两根大骨的主骨线间距
 export const PAD_L     = 70    // 画布左侧留白
 export const TAIL      = 50    // 鱼尾到主骨线起点的距离
 export const CY        = 350   // 主骨线的 Y 坐标（画布上的垂直中心）
-export const MAX_SMALL_BONES = 6  // 每根中骨最多小骨数
 
 // 方框尺寸常量
 const SM_BOX_MIN_W = 80,  SM_BOX_H = 32, SM_GAP_Y = 8   // 小骨方框
@@ -89,6 +88,19 @@ export function calculateLayout(fishData) {
 
   function midLen() { return MID_LEN }
 
+  /**
+   * 动态计算中骨横向长度。
+   * 根据该中骨下小骨的总高度动态调整，避免小骨与中骨碰撞。
+   * 小骨越多，中骨需要横向延伸更长。
+   */
+  function calcDynamicMidLen(m) {
+    const smH = totalSmallBonesH(m)
+    if (smH === 0) return MID_LEN
+    // 小骨高度的一半作为额外需要避让的距离
+    const extra = smH / 2
+    return MID_LEN + extra
+  }
+
   /** 根据文字计算方框宽度（至少 minW，最多 LINE_CHARS 个字一行） */
   function calcBoxW(text, minW, fs = 11) {
     const len = text.length
@@ -122,7 +134,7 @@ export function calculateLayout(fishData) {
       accumOff += span
       const t = centerOff / dynamicDiag
       const axOff = dd * t
-      const ml = midLen()
+      const ml = calcDynamicMidLen(m)
       const mw = midBoxW(m)
       let leftFromBx = axOff + ml + mw + 10
       if (m.smallBones.length > 0) leftFromBx += SM_LINK_LEN + maxSmBoxW(m) + 10
@@ -235,7 +247,7 @@ export function calculateLayout(fishData) {
       const t = centerOff / dynamicDiag
       const ax = bx + (ex - bx) * t
       const ay = CY + (ey - CY) * t
-      const ml = midLen()
+      const ml = calcDynamicMidLen(m)
       const mex = ax - ml
       const mw = midBoxW(m)
       const midBoxXCalc = mex - mw
@@ -305,6 +317,8 @@ export function calculateLayout(fishData) {
     midBoxW,
     bigBoxW,
     maxSmBoxW,
+    midLen,
+    calcDynamicMidLen,
     // 布局结果
     slots,
     canvasW,
@@ -358,5 +372,5 @@ export function getMidBoneAnchor(bx, cy, b, m, layout) {
   const ax = sx + (ex - sx) * t
   const ay = sy + (ey - sy) * t
 
-  return { ax, ay, t, dynamicMidLen: midLen(), mex: ax - midLen() }
+  return { ax, ay, t, dynamicMidLen: calcDynamicMidLen(m), mex: ax - calcDynamicMidLen(m) }
 }

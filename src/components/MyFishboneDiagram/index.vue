@@ -26,7 +26,7 @@
 import { ref, reactive, onMounted, onBeforeUnmount, nextTick, computed } from 'vue'
 import { Graph } from '@antv/x6'
 import { IconZoomIn, IconZoomOut, IconOriginalSize } from '@arco-design/web-vue/es/icon'
-import { calculateLayout, LINE_CHARS, DIAG, MID_LEN, PAIR_GAP, PAD_L, TAIL, CY, MAX_SMALL_BONES, BIG_GAP } from './layout'
+import { calculateLayout, LINE_CHARS, DIAG, MID_LEN, PAIR_GAP, PAD_L, TAIL, CY, BIG_GAP } from './layout'
 import { createDrawer, getBoneColor, lightenColor } from './drawer'
 
 // ═══════════════════════════════════════════════════════════
@@ -394,6 +394,7 @@ function renderGraph() {
     FISH_SCALE, HEAD_SVG_W, HEAD_SVG_H, TAIL_SVG_W, TAIL_SVG_H,
     smBoxH, totalSmallBonesH, midBoneSpan, calcHeadMargin, calcDiag,
     smBoxW, midBoxW, bigBoxW, maxSmBoxW, BIG_BOX_H, MID_BOX_H, SM_LINK_LEN, SM_GAP_Y,
+    calcDynamicMidLen,
   } = layout
 
   // ─────────────────────────────────────
@@ -501,7 +502,7 @@ function renderGraph() {
       const ay = sy + (ey - sy) * t
 
       // 中骨水平线：从锚点向左延伸
-      const dynamicMidLen = MID_LEN
+      const dynamicMidLen = calcDynamicMidLen(m)
       const mex = ax - dynamicMidLen
 
       addEdge([ax, ay], [mex, ay], boneColor, 1.5)
@@ -518,17 +519,15 @@ function renderGraph() {
 
       // 新增小骨按钮（中骨水平线中间）
       const capMid = m.id
-      if (m.smallBones.length < MAX_SMALL_BONES) {
-        const SM_BTN = 18
-        const smBtnCX = (ax + mex) / 2
-        addBtn(
-          `btn_sm_${++btnSeq}`,
-          smBtnCX - SM_BTN / 2, ay - SM_BTN / 2,
-          boneColor, '新增小骨',
-          () => addSmallBone(bid, capMid),
-          SM_BTN,
-        )
-      }
+      const SM_BTN = 18
+      const smBtnCX = (ax + mex) / 2
+      addBtn(
+        `btn_sm_${++btnSeq}`,
+        smBtnCX - SM_BTN / 2, ay - SM_BTN / 2,
+        boneColor, '新增小骨',
+        () => addSmallBone(bid, capMid),
+        SM_BTN,
+      )
 
       // --- 小骨 ---
       if (m.smallBones.length > 0) {
@@ -1018,7 +1017,7 @@ onBeforeUnmount(() => {
   border-radius: 50%;
   background: #f53f3f;
   color: #fff;
-  font-size: 12px;
+  font-size: 14px;
   line-height: 16px;
   text-align: center;
   cursor: pointer;
