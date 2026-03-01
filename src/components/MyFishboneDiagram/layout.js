@@ -192,7 +192,8 @@ export function calculateLayout(fishData) {
       const minFirstBoneX = tailSafeRight + TAIL_GAP + Math.max(topExt, botExt)
       firstBoneX = Math.max(firstBoneX, minFirstBoneX)
     } else {
-      firstBoneX = Math.max(firstBoneX, tailSafeRight + needed)
+      // 所有组都需要与鱼尾保持固定间距
+      firstBoneX = Math.max(firstBoneX, tailSafeRight + TAIL_GAP + needed)
     }
   }
 
