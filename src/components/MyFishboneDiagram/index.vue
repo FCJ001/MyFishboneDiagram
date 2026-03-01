@@ -23,9 +23,11 @@
     4. 画布支持鼠标拖拽平移和滚轮缩放
 -->
 <script setup>
-import { ref, reactive, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, reactive, onMounted, onBeforeUnmount, nextTick, computed } from 'vue'
 import { Graph } from '@antv/x6'
 import { IconZoomIn, IconZoomOut, IconOriginalSize } from '@arco-design/web-vue/es/icon'
+import { calculateLayout, LINE_CHARS, DIAG, MID_LEN, PAIR_GAP, PAD_L, TAIL, CY, MAX_SMALL_BONES, BIG_GAP } from './layout'
+import { createDrawer, getBoneColor, lightenColor } from './drawer'
 
 // ═══════════════════════════════════════════════════════════
 // 1. 组件对外接口
@@ -33,6 +35,14 @@ import { IconZoomIn, IconZoomOut, IconOriginalSize } from '@arco-design/web-vue/
 const emit = defineEmits(['confirm', 'cancel'])
 
 const loading = ref(false)
+
+/** 显示的缩放百分比（首次渲染显示100%，之后显示实际比例） */
+const displayScale = computed(() => {
+  if (isFirstRender.value) {
+    return 100
+  }
+  return Math.round(scale.value / baseScale.value * 100)
+})
 
 /**
  * 初始化入口 —— 父组件调用 ref.init(dataOrPromise?) 触发渲染。
@@ -43,6 +53,7 @@ const loading = ref(false)
  */
 async function init(dataOrPromise) {
   needsCenter = true
+  isFirstRender.value = true  // 重置为首次渲染
   if (dataOrPromise && (typeof dataOrPromise === 'function' || typeof dataOrPromise.then === 'function')) {
     loading.value = true
     try {
@@ -140,6 +151,8 @@ const callbackMap = {}           // 按钮节点 id → 点击回调
 const panX = ref(0)              // 当前水平偏移
 const panY = ref(0)              // 当前垂直偏移
 const scale = ref(1)             // 当前缩放比例
+const baseScale = ref(1)          // 基准缩放比例（首次渲染时自动计算，用于百分比显示）
+const isFirstRender = ref(true)  // 是否首次渲染（用于显示100%）
 const SCALE_MIN = 0.3
 const SCALE_MAX = 2
 let isPanning = false            // 是否正在拖拽
@@ -200,34 +213,6 @@ function onWheel(e) {
 const mode = ref('edit')         // 'edit' = 编辑模式, 'view' = 只读详情
 const editOverlays = ref([])     // 编辑模式下的 HTML 覆盖层列表
 const MAX_CHARS = 20             // 每个标签最多字符数
-const LINE_CHARS = 10            // 每行最多字符数（超过则换行）
-
-/** 根据文本长度计算方框宽度（至少 minW，最多 LINE_CHARS 个字） */
-function calcBoxW(text, minW, fs = 11) {
-  const len = text.length
-  const lineW = Math.min(len, LINE_CHARS) * (fs * 1.1) + 24
-  return Math.max(minW, lineW)
-}
-
-// ═══════════════════════════════════════════════════════════
-// 5. 调色板 —— 每根大骨按索引循环取色
-// ═══════════════════════════════════════════════════════════
-const BONE_COLORS = [
-  '#B37DD8', '#6C9E42', '#D77D1E', '#8793B9', '#CE75B8',
-  '#668FF5', '#00A0C8', '#BB8C00', '#00A68D', '#E96F56',
-]
-
-function getBoneColor(bigIndex) {
-  return BONE_COLORS[bigIndex % BONE_COLORS.length]
-}
-
-/** 将 hex 颜色转为指定透明度的 rgba（用于方框浅色背景） */
-function lightenColor(hex, alpha = 0.12) {
-  const r = parseInt(hex.slice(1, 3), 16)
-  const g = parseInt(hex.slice(3, 5), 16)
-  const b = parseInt(hex.slice(5, 7), 16)
-  return `rgba(${r},${g},${b},${alpha})`
-}
 
 // ═══════════════════════════════════════════════════════════
 // 6. 骨骼标签的 hover 编辑（大骨/中骨/小骨）
@@ -381,140 +366,15 @@ function addSmallBone(bigId, midId) {
 const headPos = reactive({ x: 0, y: 0, w: 0, h: 0 })  // 鱼头位置尺寸
 const tailPos = reactive({ x: 0, y: 0, w: 0, h: 0 })  // 鱼尾位置尺寸
 
-const CY        = 350   // 主骨线的 Y 坐标（画布上的垂直中心）
-const TAIL      = 50    // 鱼尾到主骨线起点的距离
-const PAD_L     = 70    // 画布左侧留白
-const BIG_GAP   = 100   // 大骨最小宽度
-const DIAG      = 150   // 大骨斜线的默认长度（无中骨时）
-const MID_LEN   = 90    // 中骨水平线长度
 const BTN       = 24    // 加号按钮尺寸
-const PAIR_GAP  = 60    // 同组上下两根大骨的主骨线间距
-const MAX_SMALL_BONES = 6  // 每根中骨最多小骨数
-
-// ═══════════════════════════════════════════════════════════
-// 10. X6 绘图辅助函数
-// ═══════════════════════════════════════════════════════════
-
-/** 添加一条直线边（无箭头） */
-function addEdge(s, t, color, w) {
-  const none = { tagName: 'path', d: '' }
-  graph.addEdge({
-    shape: 'edge',
-    source: { x: s[0], y: s[1] },
-    target: { x: t[0], y: t[1] },
-    attrs: {
-      line: {
-        stroke: color, strokeWidth: w, strokeLinecap: 'round',
-        targetMarker: none, sourceMarker: none,
-      },
-    },
-  })
-}
-
-/**
- * 添加一条贝塞尔弧线（用于多小骨的大括号连线）。
- * 用自定义 SVG <path> 节点实现，不依赖 X6 的 connector，
- * 这样可以精确控制弧线两端水平出入的方向。
- *
- * 控制点 cpX = 65% 的水平距离，确保：
- *   - 从起点水平出发（像大括号的根部）
- *   - 到终点水平到达（像大括号的枝端）
- */
-function addCurvedEdge(s, t, color, w) {
-  const x1 = Math.min(s[0], t[0])
-  const y1 = Math.min(s[1], t[1])
-  const padW = Math.abs(t[0] - s[0]) + 4
-  const padH = Math.max(Math.abs(t[1] - s[1]), 2) + 4
-  const ox = x1 - 2, oy = y1 - 2
-  const sx = s[0] - ox, sy = s[1] - oy
-  const tx = t[0] - ox, ty = t[1] - oy
-  const cpX = Math.abs(t[0] - s[0]) * 0.65
-  const d = `M ${sx} ${sy} C ${sx - cpX} ${sy}, ${tx + cpX} ${ty}, ${tx} ${ty}`
-  graph.addNode({
-    shape: 'rect',
-    x: ox, y: oy,
-    width: padW, height: padH,
-    markup: [
-      { tagName: 'rect', selector: 'body' },
-      { tagName: 'path', selector: 'curve' },
-    ],
-    attrs: {
-      body: { fill: 'transparent', stroke: 'none', pointerEvents: 'none' },
-      curve: { d, fill: 'none', stroke: color, strokeWidth: w, strokeLinecap: 'round' },
-    },
-  })
-}
-
-/**
- * 添加带文本的矩形节点。
- * 编辑模式下不画 X6 节点，而是把信息推入 editOverlays 数组，
- * 由 Vue template 渲染为可交互的 HTML overlay。
- *
- * @param growDir  文本超长时方框的扩展方向：-1=向上扩展, 1=向下, 0=居中扩展
- */
-function addLabelNode(
-  id, x, y, w, h, text, bg, border, fg,
-  fs = 12, fw = 500, rx = 4, boneRef = null, delInfo = null, growDir = 0,
-) {
-  const boneType = delInfo?.type || ''
-  const lineH = Math.round(fs * 1.5)
-  const needTwoLines = text.length > LINE_CHARS
-  const displayH = needTwoLines ? lineH * 2 + 6 : h
-  let displayY = y
-  if (needTwoLines) {
-    const extra = displayH - h
-    if (growDir === -1) displayY = y - extra
-    else if (growDir === 1) displayY = y
-    else displayY = y - extra / 2
-  }
-  if (mode.value === 'edit' && boneRef) {
-    editOverlays.value.push({
-      id, x, y: displayY, w, h: displayH,
-      boneRef, bg, border, fg, fs, fw, rx, delInfo, boneType,
-    })
-  } else {
-    graph.addNode({
-      id, shape: 'rect',
-      x, y: displayY, width: w, height: displayH,
-      attrs: {
-        body: { fill: bg, stroke: border, strokeWidth: 1.2, rx, ry: rx },
-        label: {
-          text, fill: fg, fontSize: fs, fontWeight: fw,
-          textWrap: { width: w - 12, height: displayH - 4, ellipsis: true },
-        },
-      },
-    })
-  }
-}
-
-/** 添加加号按钮节点（仅编辑模式可见） */
-function addBtn(id, x, y, color, tip, fn, size) {
-  if (mode.value !== 'edit') return
-  const s = size || BTN
-  callbackMap[id] = fn
-  graph.addNode({
-    id, shape: 'rect', x, y, width: s, height: s,
-    attrs: {
-      body: { fill: color, stroke: '#fff', strokeWidth: 1.5, rx: 4, ry: 4, cursor: 'pointer' },
-      label: {
-        text: '+', fill: '#fff',
-        fontSize: s === BTN ? 16 : 13,
-        fontWeight: 'bold', cursor: 'pointer',
-      },
-    },
-  })
-}
 
 // ═══════════════════════════════════════════════════════════
 // 11. 核心渲染函数 renderGraph()
 //     每次调用会销毁旧画布、重新计算布局、绘制所有元素。
 //
 //     渲染流程：
-//       ① 计算每根骨骼需要的空间（midBoneSpan, calcDiag, boneLeftExtent）
-//       ② 将大骨两两分组，从右到左排列在主骨线上
-//       ③ 计算画布边界，创建 X6 Graph
-//       ④ 绘制主骨线、鱼头、鱼尾
-//       ⑤ 遍历每根大骨 → 中骨 → 小骨，绘制斜线/水平线/弧线/方框
+//       ① 使用 layout.js 计算布局
+//       ② 使用 drawer.js 绘制元素
 // ═══════════════════════════════════════════════════════════
 function renderGraph() {
   if (!viewportRef.value) return
@@ -526,252 +386,20 @@ function renderGraph() {
   editOverlays.value = []
 
   // ─────────────────────────────────────
-  // 11a. 方框尺寸常量
+  // 1. 使用 layout.js 计算布局
   // ─────────────────────────────────────
-  const SM_BOX_MIN_W = 80,  SM_BOX_H = 32, SM_GAP_Y = 8   // 小骨方框
-  const MID_BOX_MIN_W = 100, MID_BOX_H = 36                 // 中骨方框
-  const BIG_BOX_MIN_W = 120, BIG_BOX_H = 44                 // 大骨方框
-  const SM_LINK_LEN = 40    // 小骨到中骨方框的连线长度
-
-  // ─────────────────────────────────────
-  // 11b. 尺寸计算辅助函数
-  // ─────────────────────────────────────
-
-  /** 单个小骨方框高度（超过 LINE_CHARS 则增高） */
-  function smBoxH(sm) {
-    return sm.label.length > LINE_CHARS ? SM_BOX_H * 1.8 : SM_BOX_H
-  }
-
-  /** 一根中骨下所有小骨的总高度（含间距） */
-  function totalSmallBonesH(m) {
-    if (m.smallBones.length === 0) return 0
-    let h = 0
-    for (let j = 0; j < m.smallBones.length; j++) {
-      if (j > 0) h += SM_GAP_Y
-      h += smBoxH(m.smallBones[j])
-    }
-    return h
-  }
-
-  /**
-   * 中骨沿大骨斜线方向占用的间距。
-   * 需要足够容纳该中骨的小骨群垂直高度。
-   * 因为斜线是 45°，Y轴间距 = span/√2，所以 span 要乘以 √2 补偿。
-   */
-  function midBoneSpan(m) {
-    const smH = totalSmallBonesH(m)
-    const needed = Math.max(MID_BOX_H + 20, smH + MID_BOX_H)
-    return Math.ceil(needed * Math.SQRT2)
-  }
-
-  /** 大骨斜线顶端（靠近主骨侧）给大骨标签留的空间 */
-  function calcHeadMargin(b) {
-    if (b.midBones.length === 0) return 80
-    return Math.max(80, BIG_BOX_H + 40)
-  }
-
-  /**
-   * 大骨斜线总长度 = 顶端留白 + 所有中骨间距之和 + 底端留白。
-   * 中骨越多 / 小骨越多，斜线越长。
-   */
-  function calcDiag(b) {
-    if (b.midBones.length === 0) return DIAG
-    const headMargin = calcHeadMargin(b)
-    const tailMargin = 50
-    let total = headMargin
-    for (const m of b.midBones) total += midBoneSpan(m)
-    total += tailMargin
-    return Math.max(DIAG, total)
-  }
-
-  function midLen() { return MID_LEN }
-
-  function smBoxW(sm)  { return calcBoxW(sm.label, SM_BOX_MIN_W, 18) }
-  function midBoxW(m)  { return calcBoxW(m.label, MID_BOX_MIN_W, 20) }
-  function bigBoxW(b)  { return calcBoxW(b.label, BIG_BOX_MIN_W, 24) }
-
-  /** 一根中骨下所有小骨方框的最大宽度 */
-  function maxSmBoxW(m) {
-    if (m.smallBones.length === 0) return 0
-    let mx = SM_BOX_MIN_W
-    for (const sm of m.smallBones) mx = Math.max(mx, smBoxW(sm))
-    return mx
-  }
-
-  /**
-   * 大骨从主骨交点(bx)向左延伸的最大距离。
-   * = max(斜线末端, 各中骨+小骨的水平延伸)
-   */
-  function boneLeftExtent(b) {
-    const dynamicDiag = calcDiag(b)
-    const dd = dynamicDiag / Math.SQRT2   // 斜线在 X 轴的投影长度
-    let maxLeft = dd + 80
-    let accumOff = calcHeadMargin(b)
-    for (const m of b.midBones) {
-      const span = midBoneSpan(m)
-      const centerOff = accumOff + span / 2
-      accumOff += span
-      const t = centerOff / dynamicDiag
-      const axOff = dd * t
-      const ml = midLen()
-      const mw = midBoxW(m)
-      let leftFromBx = axOff + ml + mw + 10
-      if (m.smallBones.length > 0) leftFromBx += SM_LINK_LEN + maxSmBoxW(m) + 10
-      maxLeft = Math.max(maxLeft, leftFromBx)
-    }
-    return maxLeft
-  }
-
-  function boneW(b) {
-    return Math.max(BIG_GAP, boneLeftExtent(b) + 40)
-  }
+  const layout = calculateLayout(fishData)
+  const {
+    slots, canvasW, canvasH, shiftedMainEnd, cy, shiftX, shiftY,
+    FISH_SCALE, HEAD_SVG_W, HEAD_SVG_H, TAIL_SVG_W, TAIL_SVG_H,
+    smBoxH, totalSmallBonesH, midBoneSpan, calcHeadMargin, calcDiag,
+    smBoxW, midBoxW, bigBoxW, maxSmBoxW, BIG_BOX_H, MID_BOX_H, SM_LINK_LEN, SM_GAP_Y,
+  } = layout
 
   // ─────────────────────────────────────
-  // 11c. 大骨分组 & 主骨线布局
-  //      大骨按添加顺序两两分组：第1根在上、第2根在下...
-  //      组从鱼头（右）向鱼尾（左）排列。
-  //      关键设计：鱼头到第一组的距离固定(HEAD_TO_FIRST_BONE)，
-  //      增加中骨/小骨只会向鱼尾方向扩展。
-  // ─────────────────────────────────────
-  const GROUP_GAP = 30             // 相邻大骨组之间的基础间距（可调）
-
-  const groups = []
-  for (let i = 0; i < fishData.bigBones.length; i += 2) {
-    const top = fishData.bigBones[i]
-    const bot = fishData.bigBones[i + 1] || null
-    groups.push({ top, bot })
-  }
-
-  const groupWidths = groups.map(g => {
-    const wTop = boneW(g.top)
-    const wBot = g.bot ? boneW(g.bot) : 0
-    return { g, w: Math.max(wTop, wBot) + (g.bot ? PAIR_GAP : 0) }
-  })
-
-  const HEAD_TO_FIRST_BONE = 120   // 鱼头到第一组大骨节点的固定距离（可调）
-  const tailSafeRight = PAD_L + TAIL + 50
-
-  // 计算每组相对于第一组的向左偏移量
-  const slots = []
-  const relOffsets = []
-  let cursor = 0
-  for (let gi = 0; gi < groupWidths.length; gi++) {
-    const { g } = groupWidths[gi]
-    if (gi === 0) {
-      relOffsets.push(0)
-      const topExt = boneLeftExtent(g.top)
-      const botExt = g.bot ? boneLeftExtent(g.bot) + PAIR_GAP : 0
-      cursor = Math.max(topExt, botExt) + GROUP_GAP
-    } else {
-      const dd = calcDiag(g.top) / Math.SQRT2
-      const ddBot = g.bot ? calcDiag(g.bot) / Math.SQRT2 : 0
-      const rightHalf = Math.max(dd, ddBot) * 0.2 + 20
-      const off = cursor + rightHalf
-      relOffsets.push(off)
-      const topExt = boneLeftExtent(g.top)
-      const botExt = g.bot ? boneLeftExtent(g.bot) + PAIR_GAP : 0
-      cursor = off + Math.max(topExt, botExt) + GROUP_GAP
-    }
-  }
-
-  // 确定第一组 top 节点的绝对 X（保证最左侧不越过鱼尾安全线）
-  let firstBoneX = tailSafeRight
-  for (let gi = 0; gi < groups.length; gi++) {
-    const g = groups[gi]
-    const topExt = boneLeftExtent(g.top)
-    const botExt = g.bot ? boneLeftExtent(g.bot) + PAIR_GAP : 0
-    const needed = relOffsets[gi] + Math.max(topExt, botExt)
-    firstBoneX = Math.max(firstBoneX, tailSafeRight + needed)
-  }
-
-  let mainEnd = firstBoneX + HEAD_TO_FIRST_BONE
-
-  for (let gi = 0; gi < groups.length; gi++) {
-    const g = groups[gi]
-    const topX = firstBoneX - relOffsets[gi]
-    slots.push({ b: g.top, x: topX, w: groupWidths[gi].w })
-    if (g.bot) {
-      slots.push({ b: g.bot, x: topX - PAIR_GAP, w: groupWidths[gi].w })
-    }
-  }
-
-  // ─────────────────────────────────────
-  // 11d. 计算画布边界（遍历所有骨骼找极值）
-  // ─────────────────────────────────────
-  let xMin = PAD_L - 20, xMax = mainEnd + 20
-  let yMin = CY, yMax = CY
-
-  for (const slot of slots) {
-    const { b, x: bx } = slot
-    const dir = b.position === 'top' ? -1 : 1
-    const dynamicDiag = calcDiag(b)
-    const dd = dynamicDiag / Math.SQRT2
-    const ex = bx - dd
-    const ey = CY + dir * dd
-    yMin = Math.min(yMin, ey - 80)
-    yMax = Math.max(yMax, ey + 80)
-    xMin = Math.min(xMin, ex - 80)
-    xMax = Math.max(xMax, bx + 80)
-
-    let accumOff = calcHeadMargin(b)
-    for (const m of b.midBones) {
-      const span = midBoneSpan(m)
-      const centerOff = accumOff + span / 2
-      accumOff += span
-      const t = centerOff / dynamicDiag
-      const ax = bx + (ex - bx) * t
-      const ay = CY + (ey - CY) * t
-      const ml = midLen()
-      const mex = ax - ml
-      const mw = midBoxW(m)
-      const midBoxXCalc = mex - mw
-      xMin = Math.min(xMin, midBoxXCalc - 60, ax - 60)
-      xMax = Math.max(xMax, ax + 60)
-      yMin = Math.min(yMin, ay - 60)
-      yMax = Math.max(yMax, ay + 60)
-
-      if (m.smallBones.length > 0) {
-        const tSmH = totalSmallBonesH(m)
-        yMin = Math.min(yMin, ay - tSmH / 2 - 20)
-        yMax = Math.max(yMax, ay + tSmH / 2 + 20)
-        xMin = Math.min(xMin, midBoxXCalc - SM_LINK_LEN - maxSmBoxW(m) - 20)
-      }
-    }
-  }
-
-  // 如果有元素超出左侧/上侧，整体平移画布
-  const shiftX = xMin < tailSafeRight ? tailSafeRight - xMin : 0
-  const shiftY = yMin < 0 ? -yMin + 40 : 0
-  if (shiftX > 0 || shiftY > 0) {
-    for (const s of slots) s.x += shiftX
-  }
-  let shiftedMainEnd = mainEnd + shiftX
-  const cy = CY + shiftY
-
-  const rightmost = xMax + shiftX + 20
-  if (rightmost > shiftedMainEnd) shiftedMainEnd = rightmost
-
-  // ─────────────────────────────────────
-  // 11e. 鱼头鱼尾动态缩放
-  //      中骨越多，鱼头鱼尾越大（最大 2.5 倍）
-  // ─────────────────────────────────────
-  const FISH_SCALE_BASE = 1.6       // 基础缩放（无中骨时）
-  const FISH_SCALE_MAX  = 2.5       // 最大缩放
-  const totalMidCount = fishData.bigBones.reduce((sum, b) => sum + b.midBones.length, 0)
-  const FISH_SCALE = Math.min(FISH_SCALE_MAX, FISH_SCALE_BASE + totalMidCount * 0.12)
-  const TAIL_SVG_W = 120 * FISH_SCALE, TAIL_SVG_H = 120 * FISH_SCALE
-  const HEAD_SVG_W = 120 * FISH_SCALE, HEAD_SVG_H = 120 * FISH_SCALE
-
-  // 鱼头文字尺寸随缩放联动
-  headFontSize.value = Math.round(16 * (FISH_SCALE / FISH_SCALE_BASE))
-  headTextWidth.value = Math.round(72 * (FISH_SCALE / FISH_SCALE_BASE))
-
-  // ─────────────────────────────────────
-  // 11f. 创建 X6 Graph 实例
+  // 2. 创建 X6 Graph 实例
   // ─────────────────────────────────────
   const PAD = 40
-  const canvasW = Math.max(shiftedMainEnd + HEAD_SVG_W + 40, 900)
-  const canvasH = Math.max(yMax + shiftY + PAD, Math.max(TAIL_SVG_H, HEAD_SVG_H) + 100, 700)
 
   graph = new Graph({
     container: containerRef.value,
@@ -784,6 +412,18 @@ function renderGraph() {
     interacting: { nodeMovable: false },
   })
 
+  // ─────────────────────────────────────
+  // 3. 创建绘图器（在 graph 创建之后）
+  // ─────────────────────────────────────
+  const { addEdge, addCurvedEdge, addLabelNode, addBtn } = createDrawer({
+    graph, mode, editOverlays, callbackMap, LINE_CHARS,
+  })
+
+  // 鱼头文字尺寸随缩放联动
+  const FISH_SCALE_BASE = 1.6
+  headFontSize.value = Math.round(16 * (FISH_SCALE / FISH_SCALE_BASE))
+  headTextWidth.value = Math.round(72 * (FISH_SCALE / FISH_SCALE_BASE))
+
   graph.on('node:click', ({ node }) => {
     if (didDrag) return
     const fn = callbackMap[node.id]
@@ -791,7 +431,7 @@ function renderGraph() {
   })
 
   // ─────────────────────────────────────
-  // 11g. 绘制主骨线 + 鱼头鱼尾定位 + 新增大骨按钮
+  // 4. 绘制主骨线 + 鱼头鱼尾定位 + 新增大骨按钮
   // ─────────────────────────────────────
   const mainLeft = PAD_L + shiftX + TAIL
   const mainRight = shiftedMainEnd
@@ -810,7 +450,7 @@ function renderGraph() {
   addBtn('btn_add_big', mainLeft + 15, cy - BTN / 2, '#00A68D', '新增大骨', addBigBone)
 
   // ─────────────────────────────────────
-  // 11h. 遍历每根大骨，绘制斜线 → 中骨 → 小骨
+  // 5. 遍历每根大骨，绘制斜线 → 中骨 → 小骨
   // ─────────────────────────────────────
   let btnSeq = 0
 
@@ -861,7 +501,7 @@ function renderGraph() {
       const ay = sy + (ey - sy) * t
 
       // 中骨水平线：从锚点向左延伸
-      const dynamicMidLen = midLen()
+      const dynamicMidLen = MID_LEN
       const mex = ax - dynamicMidLen
 
       addEdge([ax, ay], [mex, ay], boneColor, 1.5)
@@ -935,27 +575,61 @@ function renderGraph() {
   }
 
   // ─────────────────────────────────────
-  // 11i. 首次渲染时自动居中
+  // 6. 首次渲染时自动居中
   // ─────────────────────────────────────
   if (needsCenter) {
     scale.value = 1
-    nextTick(() => {
+    const doCenter = () => {
       if (!viewportRef.value) return
       const vw = viewportRef.value.clientWidth
       const vh = viewportRef.value.clientHeight
-      panX.value = canvasW < vw ? Math.round((vw - canvasW) / 2) : 0
-      panY.value = canvasH < vh ? Math.round((vh - canvasH) / 2) : 0
-    })
-    needsCenter = false
+      
+      // 计算合适的缩放比例，让整个图形都能显示在视口内
+      const padding = 60 // 四周留白
+      const scaleX = (vw - padding * 2) / canvasW
+      const scaleY = (vh - padding * 2) / canvasH
+      
+      // 取较小的缩放比例，确保图形完全显示
+      let fitScale = Math.min(scaleX, scaleY, 1)
+      fitScale = Math.max(fitScale, SCALE_MIN) // 不小于最小缩放
+      
+      // 只有当图形比视口大时才自动缩放
+      if (scaleX < 1 || scaleY < 1) {
+        scale.value = fitScale
+      } else {
+        scale.value = 1
+      }
+      
+      // 居中显示
+      const scaledW = canvasW * scale.value
+      const scaledH = canvasH * scale.value
+      panX.value = Math.round((vw - scaledW) / 2)
+      panY.value = Math.round((vh - scaledH) / 2)
+      
+      // 标记首次渲染完成，设置参考缩放值为当前实际缩放比例
+      if (isFirstRender.value) {
+        baseScale.value = scale.value  // 记录当前缩放比例作为基准
+        isFirstRender.value = false
+      }
+      
+      needsCenter = false
+    }
+    nextTick(doCenter)
   }
 }
 
 // ═══════════════════════════════════════════════════════════
 // 12. 缩放控制 & 生命周期
 // ═══════════════════════════════════════════════════════════
-function zoomIn()    { scale.value = Math.min(SCALE_MAX, scale.value + 0.1) }
-function zoomOut()   { scale.value = Math.max(SCALE_MIN, scale.value - 0.1) }
-function resetZoom() { needsCenter = true; scale.value = 1; renderGraph() }
+function zoomIn()    { scale.value = Math.min(SCALE_MAX * baseScale.value, scale.value + 0.1 * baseScale.value) }
+function zoomOut()   { scale.value = Math.max(SCALE_MIN * baseScale.value, scale.value - 0.1 * baseScale.value) }
+function resetZoom() { 
+  if (isFirstRender.value) {
+    // 首次渲染时重置，保持当前全貌显示
+    return
+  }
+  needsCenter = true; scale.value = baseScale.value; renderGraph() 
+}
 function onConfirm() { emit('confirm') }
 function onCancel()  { emit('cancel') }
 
@@ -1121,7 +795,7 @@ onBeforeUnmount(() => {
     </div>
 
     <!-- 右上角缩放百分比 -->
-    <div class="scale-text">{{ (scale * 100).toFixed(0) }}%</div>
+    <div class="scale-text">{{ displayScale }}%</div>
 
     <!-- 缩放控件 -->
     <div class="zoom-control">
