@@ -46,6 +46,11 @@ export function calculateLayout(fishData) {
     return sm.label.length > LINE_CHARS ? SM_BOX_Hi * 1.8 : SM_BOX_Hi
   }
 
+  /** 单个中骨方框高度（超过 LINE_CHARS 则换行增高） */
+  function midBoxH(m) {
+    return m.label.length > LINE_CHARS ? MID_BOX_Hi * 1.8 : MID_BOX_Hi
+  }
+
   /** 一根中骨下所有小骨的总高度（含间距） */
   function totalSmallBonesH(m) {
     if (m.smallBones.length === 0) return 0
@@ -59,12 +64,13 @@ export function calculateLayout(fishData) {
 
   /**
    * 中骨沿大骨斜线方向占用的间距。
-   * 需要足够容纳该中骨的小骨群垂直高度。
+   * 需要足够容纳该中骨的小骨群垂直高度和中骨方框本身的高度。
    * 因为斜线是 45°，Y轴间距 = span/√2，所以 span 要乘以 √2 补偿。
    */
   function midBoneSpan(m) {
     const smH = totalSmallBonesH(m)
-    const needed = Math.max(MID_BOX_Hi + 20, smH + MID_BOX_Hi)
+    const mbH = midBoxH(m)
+    const needed = Math.max(mbH + 20, smH + mbH)
     return Math.ceil(needed * Math.SQRT2)
   }
 
@@ -312,6 +318,7 @@ export function calculateLayout(fishData) {
     MID_BOX_MIN_Wi,
     // 辅助函数
     smBoxH,
+    midBoxH,
     totalSmallBonesH,
     midBoneSpan,
     calcHeadMargin,

@@ -210,7 +210,7 @@ function onWheel(e) {
 // ═══════════════════════════════════════════════════════════
 // 4. 编辑 / 详情 模式 & 文本参数
 // ═══════════════════════════════════════════════════════════
-const mode = ref('edit')         // 'edit' = 编辑模式, 'view' = 只读详情
+const mode = defineModel({ default: 'edit' })  // 'edit' = 编辑模式, 'view' = 只读详情
 const editOverlays = ref([])     // 编辑模式下的 HTML 覆盖层列表
 const MAX_CHARS = 20             // 每个标签最多字符数
 
@@ -249,7 +249,6 @@ function onOverlayMouseEnter(ov) {
 function onOverlayMouseLeave(ov) {
   if (hoveringOverlayId.value === ov.id) {
     hoveringOverlayId.value = null
-    renderGraph()
   }
 }
 
@@ -392,7 +391,7 @@ function renderGraph() {
   const {
     slots, canvasW, canvasH, shiftedMainEnd, cy, shiftX, shiftY,
     FISH_SCALE, HEAD_SVG_W, HEAD_SVG_H, TAIL_SVG_W, TAIL_SVG_H,
-    smBoxH, totalSmallBonesH, midBoneSpan, calcHeadMargin, calcDiag,
+    smBoxH, midBoxH, totalSmallBonesH, midBoneSpan, calcHeadMargin, calcDiag,
     smBoxW, midBoxW, bigBoxW, maxSmBoxW, BIG_BOX_H, MID_BOX_H, SM_LINK_LEN, SM_GAP_Y,
     calcDynamicMidLen,
   } = layout
@@ -511,7 +510,7 @@ function renderGraph() {
       addEdge([ax, ay], [mex, ay], boneColor, 2)
 
       // 中骨方框（紧接水平线左端）
-      const mlw = midBoxW(m), mlh = MID_BOX_H
+      const mlw = midBoxW(m), mlh = midBoxH(m)
       const midBoxX = mex - mlw
       const midBoxY = ay - mlh / 2
       addLabelNode(
