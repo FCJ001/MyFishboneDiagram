@@ -11,14 +11,15 @@ export const BIG_GAP   = 100   // 大骨最小宽度
 export const DIAG      = 150   // 大骨斜线的默认长度（无中骨时）
 export const MID_LEN   = 90    // 中骨水平线长度
 export const PAIR_GAP  = 60    // 同组上下两根大骨的主骨线间距
-export const PAD_L     = 70    // 画布左侧留白
+export const PAD_L     = 30    // 画布左侧留白
 export const TAIL      = 50    // 鱼尾到主骨线起点的距离
 export const CY        = 350   // 主骨线的 Y 坐标（画布上的垂直中心）
+export const EMPTY_MAIN_LEN = 100   // 空图时主骨线长度
 
 // 方框尺寸常量
-const SM_BOX_MIN_W = 80,  SM_BOX_H = 32, SM_GAP_Y = 8   // 小骨方框
-const MID_BOX_MIN_W = 100, MID_BOX_H = 36                 // 中骨方框
-const BIG_BOX_MIN_W = 120, BIG_BOX_H = 44                 // 大骨方框
+const SM_BOX_MIN_W = 60,  SM_BOX_H = 24, SM_GAP_Y = 8   // 小骨方框
+const MID_BOX_MIN_W = 80, MID_BOX_H = 24                 // 中骨方框
+const BIG_BOX_MIN_W = 100, BIG_BOX_H = 32                 // 大骨方框
 const SM_LINK_LEN = 40    // 小骨到中骨方框的连线长度
 const GROUP_GAP = 30             // 相邻大骨组之间的基础间距
 const HEAD_TO_FIRST_BONE = 0 // 鱼头到第一组大骨节点的固定距离（极大缩短）
@@ -32,9 +33,9 @@ export function calculateLayout(fishData) {
   // ═══════════════════════════════════════════════════════════
   // 11a. 方框尺寸常量（内部使用）
   // ═══════════════════════════════════════════════════════════════════
-  const SM_BOX_MIN_Wi = 80,  SM_BOX_Hi = 32, SM_GAP_Yi = 8
-  const MID_BOX_MIN_Wi = 100, MID_BOX_Hi = 36
-  const BIG_BOX_MIN_Wi = 120, BIG_BOX_Hi = 44
+  const SM_BOX_MIN_Wi = 60,  SM_BOX_Hi = 24, SM_GAP_Yi = 8
+  const MID_BOX_MIN_Wi = 80, MID_BOX_Hi = 24
+  const BIG_BOX_MIN_Wi = 100, BIG_BOX_Hi = 32
 
   // ═══════════════════════════════════════════════════════════
   // 11b. 尺寸计算辅助函数
@@ -209,7 +210,9 @@ export function calculateLayout(fishData) {
     }
   }
 
-  let mainEnd = firstBoneX + HEAD_TO_FIRST_BONE
+  let mainEnd = fishData.bigBones.length === 0
+    ? PAD_L + TAIL + EMPTY_MAIN_LEN
+    : firstBoneX + HEAD_TO_FIRST_BONE
 
   const slots = []
   for (let gi = 0; gi < groups.length; gi++) {

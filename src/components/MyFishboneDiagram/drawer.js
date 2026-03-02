@@ -6,7 +6,7 @@
 // ═══════════════════════════════════════════════════════════
 // 常量
 // ═══════════════════════════════════════════════════════════
-const BTN = 24  // 默认按钮大小
+const BTN = 20  // 默认按钮大小（统一为 20x20）
 
 /**
  * 创建绘图器
@@ -123,7 +123,7 @@ export function createDrawer({ graph, mode, editOverlays, callbackMap, LINE_CHAR
         body: { fill: color, stroke: '#fff', strokeWidth: 1.5, rx: 4, ry: 4, cursor: 'pointer' },
         label: {
           text: '+', fill: '#fff',
-          fontSize: s === BTN ? 16 : 13,
+          fontSize: 14,
           fontWeight: 'bold', cursor: 'pointer',
         },
       },

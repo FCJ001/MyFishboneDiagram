@@ -26,7 +26,7 @@
 import { ref, reactive, onMounted, onBeforeUnmount, nextTick, computed } from 'vue'
 import { Graph } from '@antv/x6'
 import { IconZoomIn, IconZoomOut, IconOriginalSize } from '@arco-design/web-vue/es/icon'
-import { calculateLayout, LINE_CHARS, DIAG, MID_LEN, PAIR_GAP, PAD_L, TAIL, CY, BIG_GAP } from './layout'
+import { calculateLayout, LINE_CHARS, DIAG, MID_LEN, PAIR_GAP, PAD_L, TAIL, CY, BIG_GAP, EMPTY_MAIN_LEN } from './layout'
 import { createDrawer, getBoneColor, lightenColor } from './drawer'
 
 // ═══════════════════════════════════════════════════════════
@@ -366,7 +366,7 @@ function addSmallBone(bigId, midId) {
 const headPos = reactive({ x: 0, y: 0, w: 0, h: 0 })  // 鱼头位置尺寸
 const tailPos = reactive({ x: 0, y: 0, w: 0, h: 0 })  // 鱼尾位置尺寸
 
-const BTN       = 24    // 加号按钮尺寸
+const BTN       = 20    // 加号按钮尺寸（统一为 20x20）
 
 // ═══════════════════════════════════════════════════════════
 // 11. 核心渲染函数 renderGraph()
@@ -447,7 +447,8 @@ function renderGraph() {
   headPos.w = HEAD_SVG_W
   headPos.h = HEAD_SVG_H
 
-  addEdge([mainLeft - TAIL_SVG_W * 0.3, cy], [mainRight + HEAD_SVG_W * 0.3, cy], '#00A68DFF', 3)
+  // 主骨线：线宽 4px
+  addEdge([mainLeft - TAIL_SVG_W * 0.3, cy], [mainRight + HEAD_SVG_W * 0.3, cy], '#00A68DFF', 4)
   addBtn('btn_add_big', mainLeft + 15, cy - BTN / 2, '#00A68D', '新增大骨', addBigBone)
 
   // ─────────────────────────────────────
@@ -473,11 +474,12 @@ function renderGraph() {
     const boxY = dir === -1 ? ey - lh : ey
     addLabelNode(
       `big_label_${b.id}`, boxX, boxY, lw, lh, b.label,
-      boneColor, 'transparent', '#FFFFFF', 24, 600, 0,
+      boneColor, 'transparent', '#FFFFFF', 14, 500, 0,
       b, { type: 'big', bigId: b.id }, dir,
     )
 
-    addEdge([sx, sy], [ex, ey], boneColor, 2)
+    // 大骨斜线：线宽 3px
+    addEdge([sx, sy], [ex, ey], boneColor, 3)
 
     // 新增中骨按钮（靠近主骨交点侧，距离随斜线长度动态调整）
     const bid = b.id
@@ -505,7 +507,8 @@ function renderGraph() {
       const dynamicMidLen = calcDynamicMidLen(m)
       const mex = ax - dynamicMidLen
 
-      addEdge([ax, ay], [mex, ay], boneColor, 1.5)
+      // 中骨水平线：线宽 2px
+      addEdge([ax, ay], [mex, ay], boneColor, 2)
 
       // 中骨方框（紧接水平线左端）
       const mlw = midBoxW(m), mlh = MID_BOX_H
@@ -513,13 +516,13 @@ function renderGraph() {
       const midBoxY = ay - mlh / 2
       addLabelNode(
         `mid_label_${m.id}`, midBoxX, midBoxY, mlw, mlh, m.label,
-        boneColor, boneColor, '#FFFFFF', 20, 500, 16,
+        boneColor, boneColor, '#FFFFFF', 14, 500, 16,
         m, { type: 'mid', bigId: b.id, midId: m.id },
       )
 
       // 新增小骨按钮（中骨水平线中间）
       const capMid = m.id
-      const SM_BTN = 18
+      const SM_BTN = 20
       const smBtnCX = (ax + mex) / 2
       addBtn(
         `btn_sm_${++btnSeq}`,
@@ -545,7 +548,7 @@ function renderGraph() {
           addEdge([lineOriginX, ay], [smBoxRightX, smBoxCenterY], boneColor, 1)
           addLabelNode(
             `sm_label_${sm.id}`, smBoxRightX - sw, smStartY, sw, sh, sm.label,
-            'transparent', boneColor, '#1D2129', 18, 400, 16,
+            'transparent', boneColor, '#1D2129', 12, 400, 16,
             sm, { type: 'small', bigId: b.id, midId: m.id, smId: sm.id },
           )
         } else {
@@ -563,7 +566,7 @@ function renderGraph() {
 
             addLabelNode(
               `sm_label_${sm.id}`, smBoxRightX - sw, curY, sw, sh, sm.label,
-              'transparent', boneColor, '#1D2129', 18, 400, 16,
+              'transparent', boneColor, '#1D2129', 12, 400, 16,
               sm, { type: 'small', bigId: b.id, midId: m.id, smId: sm.id },
             )
             curY += sh + SM_GAP_Y
@@ -577,6 +580,7 @@ function renderGraph() {
   // 6. 首次渲染时自动居中
   // ─────────────────────────────────────
   if (needsCenter) {
+    const isEmpty = fishData.bigBones.length === 0  // 是否是空图
     scale.value = 1
     const doCenter = () => {
       if (!viewportRef.value) return
@@ -597,6 +601,11 @@ function renderGraph() {
         scale.value = fitScale
       } else {
         scale.value = 1
+      }
+      
+      // 空图时放大显示，让主骨线更明显
+      if (isEmpty && scale.value < 1.2) {
+        scale.value = 1.1
       }
       
       // 居中显示
