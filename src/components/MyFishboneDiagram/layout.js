@@ -15,6 +15,11 @@ export const PAD_L     = 70    // 画布左侧留白
 export const TAIL      = 50    // 鱼尾到主骨线起点的距离
 export const CY        = 350   // 主骨线的 Y 坐标（画布上的垂直中心）
 
+// 空图时的布局常量（渲染空图时使用）
+export const EMPTY_MAIN_EXTRA = 200   // 空图时主骨线额外增加的长度
+export const EMPTY_OFFSET_X  = -250  // 空图时整体向左的偏移量（负值向左）
+export const EMPTY_FISH_SCALE_BASE = 2.0 // 空图时鱼头/鱼尾的基础缩放
+
 // 方框尺寸常量
 const SM_BOX_MIN_W = 80,  SM_BOX_H = 32, SM_GAP_Y = 8   // 小骨方框
 const MID_BOX_MIN_W = 100, MID_BOX_H = 36                 // 中骨方框
@@ -22,6 +27,7 @@ const BIG_BOX_MIN_W = 120, BIG_BOX_H = 44                 // 大骨方框
 const SM_LINK_LEN = 40    // 小骨到中骨方框的连线长度
 const GROUP_GAP = 30             // 相邻大骨组之间的基础间距
 const HEAD_TO_FIRST_BONE = 0 // 鱼头到第一组大骨节点的固定距离（极大缩短）
+export const BTN_SIZE = 20    // 加号按钮尺寸（统一尺寸，方便修改）
 
 /**
  * 布局计算入口函数
@@ -29,6 +35,7 @@ const HEAD_TO_FIRST_BONE = 0 // 鱼头到第一组大骨节点的固定距离（
  * @returns {Object} 布局结果 { slots, canvasW, canvasH, shiftedMainEnd, cy, shiftX, shiftY, fishScale, ... }
  */
 export function calculateLayout(fishData) {
+  const isEmpty = !fishData.bigBones || fishData.bigBones.length === 0
   // ═══════════════════════════════════════════════════════════
   // 11a. 方框尺寸常量（内部使用）
   // ═══════════════════════════════════════════════════════════════════
@@ -211,6 +218,11 @@ export function calculateLayout(fishData) {
 
   let mainEnd = firstBoneX + HEAD_TO_FIRST_BONE
 
+  // 空图时：让主骨线静态加长，避免鱼头太靠近画布中心
+  if (isEmpty) {
+    mainEnd += EMPTY_MAIN_EXTRA
+  }
+
   const slots = []
   for (let gi = 0; gi < groups.length; gi++) {
     const g = groups[gi]
@@ -266,10 +278,11 @@ export function calculateLayout(fishData) {
   }
 
   // 如果有元素超出左侧/上侧，整体平移画布
-  const shiftX = xMin < tailSafeRight ? tailSafeRight - xMin : 0
+  let shiftX = xMin < tailSafeRight ? tailSafeRight - xMin : 0
   const shiftY = yMin < 0 ? -yMin + 40 : 0
-  let shiftedMainEnd = mainEnd + shiftX
-  
+
+  const shiftedMainEnd = mainEnd + shiftX
+
   // 关键：不使用 rightmost 推远 shiftedMainEnd，让鱼头更靠近最后的大骨节点
   // const rightmost = xMax + shiftX + 20
   // if (rightmost > shiftedMainEnd) shiftedMainEnd = rightmost
@@ -278,7 +291,7 @@ export function calculateLayout(fishData) {
   // ═══════════════════════════════════════════════════════════
   // 11e. 鱼头鱼尾动态缩放
   // ═══════════════════════════════════════════════════════════
-  const FISH_SCALE_BASE = 1.6
+  const FISH_SCALE_BASE = isEmpty ? EMPTY_FISH_SCALE_BASE : 1.6
   const FISH_SCALE_MAX  = 2.5
   const totalMidCount = fishData.bigBones.reduce((sum, b) => sum + b.midBones.length, 0)
   const FISH_SCALE = Math.min(FISH_SCALE_MAX, FISH_SCALE_BASE + totalMidCount * 0.12)

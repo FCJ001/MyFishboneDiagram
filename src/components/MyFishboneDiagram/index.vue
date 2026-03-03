@@ -26,7 +26,7 @@
 import { ref, reactive, onMounted, onBeforeUnmount, nextTick, computed } from 'vue'
 import { Graph } from '@antv/x6'
 import { IconZoomIn, IconZoomOut, IconOriginalSize } from '@arco-design/web-vue/es/icon'
-import { calculateLayout, LINE_CHARS, DIAG, MID_LEN, PAIR_GAP, PAD_L, TAIL, CY, BIG_GAP } from './layout'
+import { calculateLayout, LINE_CHARS, DIAG, MID_LEN, PAIR_GAP, PAD_L, TAIL, CY, BIG_GAP, EMPTY_OFFSET_X, BTN_SIZE } from './layout'
 import { createDrawer, getBoneColor, lightenColor } from './drawer'
 
 // ═══════════════════════════════════════════════════════════
@@ -303,6 +303,10 @@ const headInputRef = ref(null)
 const headFontSize = ref(16)      // 随鱼头缩放动态调整
 const headTextWidth = ref(72)     // 随鱼头缩放动态调整
 
+// 鱼头/鱼尾位置尺寸
+const headPos = reactive({ x: 0, y: 0, w: 0, h: 0 })
+const tailPos = reactive({ x: 0, y: 0, w: 0, h: 0 })
+
 function onHeadMouseEnter() {
   if (mode.value !== 'edit') return
   headHovering.value = true
@@ -362,12 +366,6 @@ function addSmallBone(bigId, midId) {
 // 9. 布局常量
 //    下面的值决定了鱼骨图的整体尺寸和间距，
 //    修改它们可以调整图表外观。
-// ═══════════════════════════════════════════════════════════
-const headPos = reactive({ x: 0, y: 0, w: 0, h: 0 })  // 鱼头位置尺寸
-const tailPos = reactive({ x: 0, y: 0, w: 0, h: 0 })  // 鱼尾位置尺寸
-
-const BTN       = 24    // 加号按钮尺寸
-
 // ═══════════════════════════════════════════════════════════
 // 11. 核心渲染函数 renderGraph()
 //     每次调用会销毁旧画布、重新计算布局、绘制所有元素。
@@ -447,8 +445,8 @@ function renderGraph() {
   headPos.w = HEAD_SVG_W
   headPos.h = HEAD_SVG_H
 
-  addEdge([mainLeft - TAIL_SVG_W * 0.3, cy], [mainRight + HEAD_SVG_W * 0.3, cy], '#00A68DFF', 3)
-  addBtn('btn_add_big', mainLeft + 15, cy - BTN / 2, '#00A68D', '新增大骨', addBigBone)
+  addEdge([mainLeft - TAIL_SVG_W * 0.3, cy], [mainRight + HEAD_SVG_W * 0.3, cy], '#00A68DFF', 4)
+  addBtn('btn_add_big', mainLeft + 15, cy - BTN_SIZE / 2, '#00A68D', '新增大骨', addBigBone, BTN_SIZE)
 
   // ─────────────────────────────────────
   // 5. 遍历每根大骨，绘制斜线 → 中骨 → 小骨
@@ -477,16 +475,15 @@ function renderGraph() {
       b, { type: 'big', bigId: b.id }, dir,
     )
 
-    addEdge([sx, sy], [ex, ey], boneColor, 2)
+    addEdge([sx, sy], [ex, ey], boneColor, 3)
 
     // 新增中骨按钮（靠近主骨交点侧，距离随斜线长度动态调整）
     const bid = b.id
-    const MID_BTN = 20
     const btnDist = Math.min(40 + dynamicDiag * 0.06, 80)
     const btnT = btnDist / dynamicDiag
     const mbx = sx + (ex - sx) * btnT
     const mby = sy + (ey - sy) * btnT
-    addBtn(`btn_mid_${b.id}`, mbx - MID_BTN / 2, mby - MID_BTN / 2, boneColor, '新增中骨', () => addMidBone(bid), MID_BTN)
+    addBtn(`btn_mid_${b.id}`, mbx - BTN_SIZE / 2, mby - BTN_SIZE / 2, boneColor, '新增中骨', () => addMidBone(bid), BTN_SIZE)
 
     // --- 遍历中骨 ---
     let accumOffset = calcHeadMargin(b)
@@ -505,7 +502,7 @@ function renderGraph() {
       const dynamicMidLen = calcDynamicMidLen(m)
       const mex = ax - dynamicMidLen
 
-      addEdge([ax, ay], [mex, ay], boneColor, 1.5)
+      addEdge([ax, ay], [mex, ay], boneColor, 2)
 
       // 中骨方框（紧接水平线左端）
       const mlw = midBoxW(m), mlh = MID_BOX_H
@@ -519,14 +516,13 @@ function renderGraph() {
 
       // 新增小骨按钮（中骨水平线中间）
       const capMid = m.id
-      const SM_BTN = 18
       const smBtnCX = (ax + mex) / 2
       addBtn(
         `btn_sm_${++btnSeq}`,
-        smBtnCX - SM_BTN / 2, ay - SM_BTN / 2,
+        smBtnCX - BTN_SIZE / 2, ay - BTN_SIZE / 2,
         boneColor, '新增小骨',
         () => addSmallBone(bid, capMid),
-        SM_BTN,
+        BTN_SIZE,
       )
 
       // --- 小骨 ---
@@ -582,35 +578,39 @@ function renderGraph() {
       if (!viewportRef.value) return
       const vw = viewportRef.value.clientWidth
       const vh = viewportRef.value.clientHeight
-      
+
       // 计算合适的缩放比例，让整个图形都能显示在视口内
       const padding = 60 // 四周留白
       const scaleX = (vw - padding * 2) / canvasW
       const scaleY = (vh - padding * 2) / canvasH
-      
+
       // 取较小的缩放比例，确保图形完全显示
       let fitScale = Math.min(scaleX, scaleY, 1)
       fitScale = Math.max(fitScale, SCALE_MIN) // 不小于最小缩放
-      
+
       // 只有当图形比视口大时才自动缩放
       if (scaleX < 1 || scaleY < 1) {
         scale.value = fitScale
       } else {
         scale.value = 1
       }
-      
+
+      // 空图时：整体向左偏移视图（不改变主骨线位置）
+      const isEmpty = fishData.bigBones.length === 0
+      const offsetX = isEmpty ? EMPTY_OFFSET_X : 0
+
       // 居中显示
       const scaledW = canvasW * scale.value
       const scaledH = canvasH * scale.value
-      panX.value = Math.round((vw - scaledW) / 2)
+      panX.value = Math.round((vw - scaledW) / 2 + offsetX)
       panY.value = Math.round((vh - scaledH) / 2)
-      
+
       // 标记首次渲染完成，设置参考缩放值为当前实际缩放比例
       if (isFirstRender.value) {
         baseScale.value = scale.value  // 记录当前缩放比例作为基准
         isFirstRender.value = false
       }
-      
+
       needsCenter = false
     }
     nextTick(doCenter)

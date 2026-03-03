@@ -3,10 +3,7 @@
  * 负责：节点/边的绘制、按钮创建等
  */
 
-// ═══════════════════════════════════════════════════════════
-// 常量
-// ═══════════════════════════════════════════════════════════
-const BTN = 24  // 默认按钮大小
+import { BTN_SIZE } from './layout'
 
 /**
  * 创建绘图器
@@ -115,7 +112,7 @@ export function createDrawer({ graph, mode, editOverlays, callbackMap, LINE_CHAR
   /** 添加加号按钮节点（仅编辑模式可见） */
   function addBtn(id, x, y, color, tip, fn, size) {
     if (mode.value !== 'edit') return
-    const s = size || BTN
+    const s = size || BTN_SIZE
     callbackMap[id] = fn
     graph.addNode({
       id, shape: 'rect', x, y, width: s, height: s,
@@ -123,7 +120,7 @@ export function createDrawer({ graph, mode, editOverlays, callbackMap, LINE_CHAR
         body: { fill: color, stroke: '#fff', strokeWidth: 1.5, rx: 4, ry: 4, cursor: 'pointer' },
         label: {
           text: '+', fill: '#fff',
-          fontSize: s === BTN ? 16 : 13,
+          fontSize: s === BTN_SIZE ? 16 : 13,
           fontWeight: 'bold', cursor: 'pointer',
         },
       },
@@ -135,7 +132,7 @@ export function createDrawer({ graph, mode, editOverlays, callbackMap, LINE_CHAR
     addCurvedEdge,
     addLabelNode,
     addBtn,
-    BTN,
+    BTN_SIZE,
   }
 }
 
