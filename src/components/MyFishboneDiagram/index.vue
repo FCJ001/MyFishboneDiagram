@@ -1,59 +1,28 @@
-<!--
-  鱼骨图组件 (Fishbone / Ishikawa Diagram)
-  ==========================================
-  整体结构（从右到左）：
-    鱼头 ─── 主骨线 ─── 鱼尾
-              │
-         ┌────┴────┐
-       大骨(斜线)  大骨(斜线)    ← 上下交替排列，每两根为一组
-         │           │
-       中骨(水平)  中骨(水平)    ← 从大骨斜线上分支出来
-         │
-       小骨(方框)               ← 从中骨方框左侧延伸，多个时用弧线连接
-
-  技术栈：
-    - Vue 3 (Composition API + <script setup>)
-    - @antv/x6 v3 — 用于绘制线条(edge)和节点(node)
-    - Arco Design Vue — UI 组件（按钮、图标、单选等）
-
-  核心思路：
-    1. 数据驱动：fishData 是 reactive 对象，存储所有骨骼的树形结构
-    2. 每次数据变化后调用 renderGraph() 重新计算布局并绘制
-    3. 编辑模式下，骨骼标签用 HTML overlay 覆盖在 X6 画布上方，支持 hover 编辑
-    4. 画布支持鼠标拖拽平移和滚轮缩放
--->
+<!-- 鱼骨图组件 -->
 <script setup>
 import { ref, reactive, onMounted, onBeforeUnmount, nextTick, computed } from 'vue'
 import { Graph } from '@antv/x6'
 import { IconZoomIn, IconZoomOut, IconOriginalSize } from '@arco-design/web-vue/es/icon'
-import { calculateLayout, LINE_CHARS, DIAG, MID_LEN, PAIR_GAP, PAD_L, TAIL, CY, BIG_GAP, EMPTY_OFFSET_X, BTN_SIZE } from './layout'
-import { createDrawer, getBoneColor, lightenColor } from './drawer'
+import { calculateLayout, LINE_CHARS, PAD_L, TAIL, EMPTY_OFFSET_X, BTN_SIZE } from './layout'
+import { createDrawer, getBoneColor } from './drawer'
 
-// ═══════════════════════════════════════════════════════════
-// 1. 组件对外接口
-// ═══════════════════════════════════════════════════════════
+// 事件
 const emit = defineEmits(['confirm', 'cancel'])
 
+// 加载状态
 const loading = ref(false)
 
-/** 显示的缩放百分比（首次渲染显示100%，之后显示实际比例） */
+// 显示缩放百分比
 const displayScale = computed(() => {
-  if (isFirstRender.value) {
-    return 100
-  }
+  if (isFirstRender.value) return 100
   return Math.round(scale.value / baseScale.value * 100)
 })
 
-/**
- * 初始化入口 —— 父组件调用 ref.init(dataOrPromise?) 触发渲染。
- * @param {Object|Promise|Function} [dataOrPromise]
- *   - 不传：渲染空图
- *   - 传对象：直接填充数据并渲染
- *   - 传 Promise / async 函数：先显示 loading，数据返回后渲染
- */
+// 初始化入口，外部调用 init(data) 渲染图表
 async function init(dataOrPromise) {
   needsCenter = true
-  isFirstRender.value = true  // 重置为首次渲染
+  isFirstRender.value = true
+  // 支持 Promise 或 async 函数
   if (dataOrPromise && (typeof dataOrPromise === 'function' || typeof dataOrPromise.then === 'function')) {
     loading.value = true
     try {
@@ -65,6 +34,7 @@ async function init(dataOrPromise) {
   } else if (dataOrPromise) {
     setData(dataOrPromise)
   }
+  // 等待 DOM 准备好后渲染
   const tryRender = () => {
     const c = containerRef.value
     const vp = viewportRef.value
@@ -77,10 +47,7 @@ async function init(dataOrPromise) {
   nextTick(tryRender)
 }
 
-/**
- * 从外部数据填充鱼骨图。
- * 会自动生成 id、分配 position，外部只需提供 label。
- */
+// 填充数据，自动生成 id 和 position
 function setData(data) {
   idSeq = 0
   fishData.bigBones = []
@@ -116,9 +83,7 @@ function setData(data) {
   }
 }
 
-/**
- * 获取当前鱼骨图的纯数据（不含 id/position，可用于持久化）。
- */
+// 获取纯数据（不含 id），用于持久化
 function getData() {
   return {
     headLabel: headLabel.value,
@@ -134,36 +99,31 @@ function getData() {
 
 defineExpose({ init, setData, getData })
 
-// ═══════════════════════════════════════════════════════════
-// 2. DOM 引用 & X6 实例
-// ═══════════════════════════════════════════════════════════
-const containerRef = ref(null)   // X6 Graph 的挂载容器
-const viewportRef = ref(null)    // 可视窗口（负责裁剪）
-const worldRef = ref(null)       // 世界容器（transform 缩放平移）
-let graph = null                 // X6 Graph 实例
-let needsCenter = true           // 是否需要自动居中
-const callbackMap = {}           // 按钮节点 id → 点击回调
+// DOM 引用
+const containerRef = ref(null)
+const viewportRef = ref(null)
+const worldRef = ref(null)
+let graph = null
+let needsCenter = true
+const callbackMap = {}
 
-// ═══════════════════════════════════════════════════════════
-// 3. 画布拖拽平移 & 滚轮缩放
-//    原理：用 CSS transform 的 translate + scale 控制世界容器
-// ═══════════════════════════════════════════════════════════
-const panX = ref(0)              // 当前水平偏移
-const panY = ref(0)              // 当前垂直偏移
-const scale = ref(1)             // 当前缩放比例
-const baseScale = ref(1)          // 基准缩放比例（首次渲染时自动计算，用于百分比显示）
-const isFirstRender = ref(true)  // 是否首次渲染（用于显示100%）
+// 画布拖拽平移
+const panX = ref(0)
+const panY = ref(0)
+const scale = ref(1)
+const baseScale = ref(1)
+const isFirstRender = ref(true)
 const SCALE_MIN = 0.001
 const SCALE_MAX = 1000
-let isPanning = false            // 是否正在拖拽
-let panStartX = 0                // 拖拽起始鼠标 X
-let panStartY = 0                // 拖拽起始鼠标 Y
-let panOriginX = 0               // 拖拽起始 panX
-let panOriginY = 0               // 拖拽起始 panY
-let didDrag = false              // 本次 pointer 操作是否产生了拖拽（用来区分点击和拖拽）
+let isPanning = false
+let panStartX = 0
+let panStartY = 0
+let panOriginX = 0
+let panOriginY = 0
+let didDrag = false
 
+// 指针按下，开始拖拽
 function onPointerDown(e) {
-  // 如果点在编辑区域内，不启动拖拽
   if (e.target.closest('.inline-edit-wrap') || e.target.closest('.fish-head-label')) return
   isPanning = true
   didDrag = false
@@ -174,6 +134,7 @@ function onPointerDown(e) {
   viewportRef.value.style.cursor = 'grabbing'
 }
 
+// 指针移动，拖拽画布
 function onPointerMove(e) {
   if (!isPanning) return
   const dx = e.clientX - panStartX
@@ -183,17 +144,14 @@ function onPointerMove(e) {
   panY.value = panOriginY + dy
 }
 
+// 指针抬起，结束拖拽
 function onPointerUp() {
   if (!isPanning) return
   isPanning = false
   if (viewportRef.value) viewportRef.value.style.cursor = ''
 }
 
-/**
- * 滚轮缩放 —— 以鼠标位置为缩放中心点。
- * 数学原理：缩放后保持鼠标指向的画布坐标不变。
- *   newPan = mousePos - (mousePos - oldPan) * (newScale / oldScale)
- */
+// 滚轮缩放，以鼠标位置为中心
 function onWheel(e) {
   e.preventDefault()
   const rect = viewportRef.value.getBoundingClientRect()
@@ -207,32 +165,27 @@ function onWheel(e) {
   scale.value = newScale
 }
 
-// ═══════════════════════════════════════════════════════════
-// 4. 编辑 / 详情 模式 & 文本参数
-// ═══════════════════════════════════════════════════════════
-const mode = defineModel({ default: 'edit' }) // 'edit' = 编辑模式, 'view' = 只读详情
-const editOverlays = ref([])     // 编辑模式下的 HTML 覆盖层列表
-const MAX_CHARS = 20             // 每个标签最多字符数
+// 模式：编辑/详情
+const mode = defineModel({ default: 'edit' })
+const editOverlays = ref([])
+const MAX_CHARS = 20
 
-// ═══════════════════════════════════════════════════════════
-// 6. 骨骼标签的 hover 编辑（大骨/中骨/小骨）
-//    原理：鼠标移入时将 overlay div 切换为 input，
-//          移出或失焦时恢复为文本并重绘（仅当数据变化时）。
-// ═══════════════════════════════════════════════════════════
+// 骨骼编辑覆盖层
 const hoveringOverlayId = ref(null)
-const originalLabel = ref('') // 保存编辑前的原始值
+const originalLabel = ref('')
 
+// 覆盖层失焦，值变化时重绘
 function onOverlayBlur() {
   const currentLabel = hoveringOverlayId.value
     ? editOverlays.value.find(ov => ov.id === hoveringOverlayId.value)?.boneRef.label
     : ''
-  // 只有当数据变化时才重绘
   if (currentLabel !== originalLabel.value) {
     renderGraph()
   }
   hoveringOverlayId.value = null
 }
 
+// 输入框输入
 function onOverlayInput(e, ov) {
   const val = e.target.value
   if (val.length > MAX_CHARS) {
@@ -243,9 +196,10 @@ function onOverlayInput(e, ov) {
   }
 }
 
+// 鼠标进入覆盖层
 function onOverlayMouseEnter(ov) {
   if (mode.value === 'edit') {
-    originalLabel.value = ov.boneRef.label // 保存原始值
+    originalLabel.value = ov.boneRef.label
     hoveringOverlayId.value = ov.id
     nextTick(() => {
       const el = document.querySelector(`#edit-input-${ov.id}`)
@@ -254,19 +208,17 @@ function onOverlayMouseEnter(ov) {
   }
 }
 
-// 处理详情模式下的骨骼标签显示：10字换行，最多20字
+// 获取显示标签，超过10字换行，最多20字
 function getDisplayLabel(text) {
   let label = text || ''
-  if (label.length > 20) {
-    label = label.slice(0, 20)
-  }
-  // 详情模式或编辑模式的非hover状态，超过10字时换行
+  if (label.length > 20) label = label.slice(0, 20)
   if ((mode.value === 'view' || mode.value === 'edit') && label.length > 10) {
     return label.slice(0, 10) + '\n' + label.slice(10)
   }
   return label
 }
 
+// 鼠标离开覆盖层
 function onOverlayMouseLeave(ov) {
   if (hoveringOverlayId.value === ov.id) {
     hoveringOverlayId.value = null
@@ -274,18 +226,13 @@ function onOverlayMouseLeave(ov) {
   }
 }
 
-// ═══════════════════════════════════════════════════════════
-// 7. 骨骼增删操作
-// ═══════════════════════════════════════════════════════════
-
-/** 删除骨骼（大骨/中骨/小骨），删除后自动重绘 */
+// 删除骨骼
 function deleteBone(delInfo) {
   if (!delInfo) return
   const { type, bigId, midId, smId } = delInfo
   if (type === 'big') {
     const idx = fishData.bigBones.findIndex((b) => b.id === bigId)
     if (idx >= 0) fishData.bigBones.splice(idx, 1)
-    // 删除后重新分配上下位置：偶数索引在上，奇数在下
     fishData.bigBones.forEach((b, i) => {
       b.position = i % 2 === 0 ? 'top' : 'bottom'
     })
@@ -305,56 +252,50 @@ function deleteBone(delInfo) {
   renderGraph()
 }
 
-// ═══════════════════════════════════════════════════════════
-// 8. 数据模型
-//    fishData.bigBones 是一个数组，每项结构：
-//    {
-//      id, label, position('top'|'bottom'),
-//      midBones: [{ id, label, smallBones: [{ id, label }] }]
-//    }
-// ═══════════════════════════════════════════════════════════
+// ID 生成器
 let idSeq = 0
 const genId = () => `n_${++idSeq}`
 const fishData = reactive({ bigBones: [] })
 
-// --- 鱼头标签（hover 编辑）---
+// 鱼头标签
 const headLabel = ref('问题详情')
 const headHovering = ref(false)
 const headInputRef = ref(null)
-const headFontSize = ref(14)      // 随鱼头缩放动态调整
-const headTextWidth = ref(72)     // 随鱼头缩放动态调整
+const headFontSize = ref(14)
+const headTextWidth = ref(72)
 
-// 详情模式鱼头文本处理：10字换行，最多20字
+// 鱼头显示文本
 const displayHeadLabel = computed(() => {
   let text = headLabel.value
-  if (text.length > 20) {
-    text = text.slice(0, 20)
-  }
-  // 详情模式或编辑模式的非hover状态，超过10字时换行
+  if (text.length > 20) text = text.slice(0, 20)
   if ((mode.value === 'view' || (mode.value === 'edit' && !headHovering.value)) && text.length > 10) {
     return text.slice(0, 10) + '\n' + text.slice(10)
   }
   return text
 })
 
-// 鱼头/鱼尾位置尺寸
+// 鱼头鱼尾位置
 const headPos = reactive({ x: 0, y: 0, w: 0, h: 0 })
 const tailPos = reactive({ x: 0, y: 0, w: 0, h: 0 })
-const originalHeadLabel = ref('') // 保存鱼头原始值
+const originalHeadLabel = ref('')
 
+// 鼠标进入鱼头
 function onHeadMouseEnter() {
   if (mode.value !== 'edit') return
-  originalHeadLabel.value = headLabel.value // 保存原始值
+  originalHeadLabel.value = headLabel.value
   headHovering.value = true
   nextTick(() => { headInputRef.value?.focus() })
 }
+
+// 鼠标离开鱼头
 function onHeadMouseLeave() {
-  // 只有当数据变化时才重绘
   if (headLabel.value !== originalHeadLabel.value) {
     renderGraph()
   }
   headHovering.value = false
 }
+
+// 鱼头输入
 function onHeadInput(e) {
   const val = e.target.value
   if (val.length > MAX_CHARS) {
@@ -365,7 +306,7 @@ function onHeadInput(e) {
   }
 }
 
-// --- 新增骨骼 ---
+// 新增大骨
 function addBigBone() {
   const n = fishData.bigBones.length
   fishData.bigBones.push({
@@ -377,6 +318,7 @@ function addBigBone() {
   renderGraph()
 }
 
+// 新增中骨
 function addMidBone(bigId) {
   const b = fishData.bigBones.find((x) => x.id === bigId)
   if (!b) return
@@ -389,6 +331,7 @@ function addMidBone(bigId) {
   renderGraph()
 }
 
+// 新增小骨
 function addSmallBone(bigId, midId) {
   const b = fishData.bigBones.find((x) => x.id === bigId)
   if (!b) return
@@ -402,30 +345,17 @@ function addSmallBone(bigId, midId) {
   renderGraph()
 }
 
-// ═══════════════════════════════════════════════════════════
-// 9. 布局常量
-//    下面的值决定了鱼骨图的整体尺寸和间距，
-//    修改它们可以调整图表外观。
-// ═══════════════════════════════════════════════════════════
-// 11. 核心渲染函数 renderGraph()
-//     每次调用会销毁旧画布、重新计算布局、绘制所有元素。
-//
-//     渲染流程：
-//       ① 使用 layout.js 计算布局
-//       ② 使用 drawer.js 绘制元素
-// ═══════════════════════════════════════════════════════════
+// 核心渲染函数
 function renderGraph() {
   if (!viewportRef.value) return
 
-  // --- 清理旧画布 ---
+  // 清理旧画布
   if (graph) graph.dispose()
   containerRef.value.innerHTML = ''
   Object.keys(callbackMap).forEach((k) => delete callbackMap[k])
   editOverlays.value = []
 
-  // ─────────────────────────────────────
-  // 1. 使用 layout.js 计算布局
-  // ─────────────────────────────────────
+  // 计算布局
   const layout = calculateLayout(fishData)
   const {
     slots, canvasW, canvasH, shiftedMainEnd, cy, shiftX, shiftY,
@@ -435,11 +365,9 @@ function renderGraph() {
     calcDynamicMidLen,
   } = layout
 
-  // ─────────────────────────────────────
-  // 2. 创建 X6 Graph 实例
-  // ─────────────────────────────────────
   const PAD = 40
 
+  // 创建 X6 画布
   graph = new Graph({
     container: containerRef.value,
     width: canvasW,
@@ -451,9 +379,7 @@ function renderGraph() {
     interacting: { nodeMovable: false },
   })
 
-  // ─────────────────────────────────────
-  // 3. 创建绘图器（在 graph 创建之后）
-  // ─────────────────────────────────────
+  // 创建绘图器
   const { addEdge, addCurvedEdge, addLabelNode, addBtn } = createDrawer({
     graph, mode, editOverlays, callbackMap, LINE_CHARS,
   })
@@ -463,49 +389,50 @@ function renderGraph() {
   headFontSize.value = Math.round(14 * (FISH_SCALE / FISH_SCALE_BASE))
   headTextWidth.value = Math.round(72 * (FISH_SCALE / FISH_SCALE_BASE))
 
+  // 节点点击事件
   graph.on('node:click', ({ node }) => {
     if (didDrag) return
     const fn = callbackMap[node.id]
     if (fn) fn()
   })
 
-  // ─────────────────────────────────────
-  // 4. 绘制主骨线 + 鱼头鱼尾定位 + 新增大骨按钮
-  // ─────────────────────────────────────
+  // 主骨线位置
   const mainLeft = PAD_L + shiftX + TAIL
   const mainRight = shiftedMainEnd
 
+  // 鱼尾位置
   tailPos.x = mainLeft - TAIL_SVG_W
   tailPos.y = cy - TAIL_SVG_H / 2
   tailPos.w = TAIL_SVG_W
   tailPos.h = TAIL_SVG_H
 
+  // 鱼头位置
   headPos.x = mainRight
   headPos.y = cy - HEAD_SVG_H / 2
   headPos.w = HEAD_SVG_W
   headPos.h = HEAD_SVG_H
 
+  // 绘制主骨线
   addEdge([mainLeft - TAIL_SVG_W * 0.3, cy], [mainRight + HEAD_SVG_W * 0.3, cy], '#00A68DFF', 4)
+  // 新增大骨按钮
   addBtn('btn_add_big', mainLeft + 15, cy - BTN_SIZE / 2, '#00A68D', '新增大骨', addBigBone, BTN_SIZE)
 
-  // ─────────────────────────────────────
-  // 5. 遍历每根大骨，绘制斜线 → 中骨 → 小骨
-  // ─────────────────────────────────────
   let btnSeq = 0
 
+  // 遍历每根大骨
   for (const slot of slots) {
     const { b, x: bx } = slot
     const bigIdx = fishData.bigBones.indexOf(b)
     const boneColor = getBoneColor(bigIdx)
-    const dir = b.position === 'top' ? -1 : 1   // -1=向上, 1=向下
+    const dir = b.position === 'top' ? -1 : 1
 
-    // 大骨斜线起点(主骨上) → 终点
+    // 大骨斜线
     const dynamicDiag = calcDiag(b)
     const dd = dynamicDiag / Math.SQRT2
-    const sx = bx, sy = cy            // 起点（主骨交点）
-    const ex = bx - dd, ey = cy + dir * dd   // 终点（斜线末端）
+    const sx = bx, sy = cy
+    const ex = bx - dd, ey = cy + dir * dd
 
-    // 大骨标签方框（放在斜线末端）
+    // 大骨标签
     const lw = bigBoxW(b), lh = bigBoxH(b)
     const boxX = ex - lw / 2
     const boxY = dir === -1 ? ey - lh : ey
@@ -517,7 +444,7 @@ function renderGraph() {
 
     addEdge([sx, sy], [ex, ey], boneColor, 3)
 
-    // 新增中骨按钮（靠近主骨交点侧，距离随斜线长度动态调整）
+    // 新增中骨按钮
     const bid = b.id
     const btnDist = Math.min(40 + dynamicDiag * 0.06, 80)
     const btnT = btnDist / dynamicDiag
@@ -525,7 +452,7 @@ function renderGraph() {
     const mby = sy + (ey - sy) * btnT
     addBtn(`btn_mid_${b.id}`, mbx - BTN_SIZE / 2, mby - BTN_SIZE / 2, boneColor, '新增中骨', () => addMidBone(bid), BTN_SIZE)
 
-    // --- 遍历中骨 ---
+    // 遍历中骨
     let accumOffset = calcHeadMargin(b)
     for (let i = 0; i < b.midBones.length; i++) {
       const m = b.midBones[i]
@@ -533,18 +460,18 @@ function renderGraph() {
       const centerOffset = accumOffset + span / 2
       accumOffset += span
 
-      // 中骨在斜线上的锚点(ax,ay)：按比例 t 插值
+      // 中骨锚点
       const t = centerOffset / dynamicDiag
       const ax = sx + (ex - sx) * t
       const ay = sy + (ey - sy) * t
 
-      // 中骨水平线：从锚点向左延伸
+      // 中骨水平线
       const dynamicMidLen = calcDynamicMidLen(m)
       const mex = ax - dynamicMidLen
 
       addEdge([ax, ay], [mex, ay], boneColor, 2)
 
-      // 中骨方框（紧接水平线左端）
+      // 中骨标签
       const mlw = midBoxW(m), mlh = midBoxH(m)
       const midBoxX = mex - mlw
       const midBoxY = ay - mlh / 2
@@ -554,7 +481,7 @@ function renderGraph() {
         m, { type: 'mid', bigId: b.id, midId: m.id },
       )
 
-      // 新增小骨按钮（中骨水平线中间）
+      // 新增小骨按钮
       const capMid = m.id
       const smBtnCX = (ax + mex) / 2
       addBtn(
@@ -565,16 +492,16 @@ function renderGraph() {
         BTN_SIZE,
       )
 
-      // --- 小骨 ---
+      // 绘制小骨
       if (m.smallBones.length > 0) {
         const smCount = m.smallBones.length
         const tSmH = totalSmallBonesH(m)
-        const smStartY = ay - tSmH / 2       // 小骨群垂直居中于中骨锚点
-        const lineOriginX = midBoxX           // 连线起点 = 中骨方框左边缘
-        const smBoxRightX = lineOriginX - SM_LINK_LEN  // 小骨方框右边缘
+        const smStartY = ay - tSmH / 2
+        const lineOriginX = midBoxX
+        const smBoxRightX = lineOriginX - SM_LINK_LEN
 
         if (smCount === 1) {
-          // 单个小骨：直线连接
+          // 单个小骨直线连接
           const sm = m.smallBones[0]
           const sw = smBoxW(sm), sh = smBoxH(sm)
           const smBoxCenterY = smStartY + sh / 2
@@ -585,7 +512,7 @@ function renderGraph() {
             sm, { type: 'small', bigId: b.id, midId: m.id, smId: sm.id },
           )
         } else {
-          // 多个小骨：先画短横线，再用贝塞尔弧线分叉到各小骨
+          // 多个小骨弧线连接
           const branchX = lineOriginX - 12
           addEdge([lineOriginX, ay], [branchX, ay], boneColor, 1)
 
@@ -609,9 +536,7 @@ function renderGraph() {
     }
   }
 
-  // ─────────────────────────────────────
-  // 6. 首次渲染时自动居中
-  // ─────────────────────────────────────
+  // 首次渲染自动居中
   if (needsCenter) {
     scale.value = 1
     const doCenter = () => {
@@ -619,35 +544,29 @@ function renderGraph() {
       const vw = viewportRef.value.clientWidth
       const vh = viewportRef.value.clientHeight
 
-      // 计算合适的缩放比例，让整个图形都能显示在视口内
-      const padding = 60 // 四周留白
+      const padding = 60
       const scaleX = (vw - padding * 2) / canvasW
       const scaleY = (vh - padding * 2) / canvasH
 
-      // 取较小的缩放比例，确保图形完全显示
       let fitScale = Math.min(scaleX, scaleY, 1)
-      fitScale = Math.max(fitScale, SCALE_MIN) // 不小于最小缩放
+      fitScale = Math.max(fitScale, SCALE_MIN)
 
-      // 只有当图形比视口大时才自动缩放
       if (scaleX < 1 || scaleY < 1) {
         scale.value = fitScale
       } else {
         scale.value = 1
       }
 
-      // 空图时：整体向左偏移视图（不改变主骨线位置）
       const isEmpty = fishData.bigBones.length === 0
       const offsetX = isEmpty ? EMPTY_OFFSET_X : 0
 
-      // 居中显示
       const scaledW = canvasW * scale.value
       const scaledH = canvasH * scale.value
       panX.value = Math.round((vw - scaledW) / 2 + offsetX)
       panY.value = Math.round((vh - scaledH) / 2)
 
-      // 标记首次渲染完成，设置参考缩放值为当前实际缩放比例
       if (isFirstRender.value) {
-        baseScale.value = scale.value  // 记录当前缩放比例作为基准
+        baseScale.value = scale.value
         isFirstRender.value = false
       }
 
@@ -657,21 +576,17 @@ function renderGraph() {
   }
 }
 
-// ═══════════════════════════════════════════════════════════
-// 12. 缩放控制 & 生命周期
-// ═══════════════════════════════════════════════════════════
+// 缩放操作
 function zoomIn()    { scale.value = Math.min(SCALE_MAX * baseScale.value, scale.value + 0.1 * baseScale.value) }
 function zoomOut()   { scale.value = Math.max(SCALE_MIN * baseScale.value, scale.value - 0.1 * baseScale.value) }
-function resetZoom() { 
-  if (isFirstRender.value) {
-    // 首次渲染时重置，保持当前全貌显示
-    return
-  }
-  needsCenter = true; scale.value = baseScale.value; renderGraph() 
+function resetZoom() {
+  if (isFirstRender.value) return
+  needsCenter = true; scale.value = baseScale.value; renderGraph()
 }
 function onConfirm() { emit('confirm') }
 function onCancel()  { emit('cancel') }
 
+// 生命周期
 onMounted(() => {
   window.addEventListener('pointermove', onPointerMove)
   window.addEventListener('pointerup', onPointerUp)
@@ -689,23 +604,23 @@ onBeforeUnmount(() => {
     <div v-if="loading" class="fishbone-loading">
       <a-spin tip="加载中..." />
     </div>
-    <!-- 视口：负责裁剪和接收鼠标事件 -->
+    <!-- 视口 -->
     <div
       class="fishbone-viewport"
       ref="viewportRef"
       @pointerdown="onPointerDown"
       @wheel.prevent="onWheel"
     >
-      <!-- 世界容器：通过 transform 实现平移+缩放 -->
+      <!-- 世界容器 -->
       <div
         class="fishbone-world"
         ref="worldRef"
         :style="{ transform: `translate(${panX}px, ${panY}px) scale(${scale})` }"
       >
-        <!-- X6 画布挂载点 -->
+        <!-- X6 画布 -->
         <div class="fishbone-canvas" ref="containerRef" />
 
-        <!-- 鱼尾 SVG -->
+        <!-- 鱼尾 -->
         <div
           class="fish-part"
           :style="{
@@ -731,7 +646,7 @@ onBeforeUnmount(() => {
           </svg>
         </div>
 
-        <!-- 鱼头 SVG + 标签 -->
+        <!-- 鱼头 -->
         <div
           class="fish-part"
           :style="{
@@ -755,7 +670,7 @@ onBeforeUnmount(() => {
               transform="matrix(0,1,-1,0,124.5,0)"
             />
           </svg>
-          <!-- 鱼头标签：hover 切换为 input 编辑 -->
+          <!-- 鱼头标签 -->
           <div
             class="fish-head-label"
             :title="mode === 'view' ? '' : headLabel"
@@ -780,7 +695,7 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <!-- 骨骼编辑覆盖层：hover 时切换为 input -->
+        <!-- 骨骼编辑覆盖层 -->
         <div
           v-for="ov in editOverlays"
           :key="ov.id"
@@ -833,7 +748,7 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- 右上角缩放百分比 -->
+    <!-- 缩放百分比 -->
     <div class="scale-text">{{ displayScale }}%</div>
 
     <!-- 缩放控件 -->
@@ -862,7 +777,6 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-/* ==================== 页面整体布局 ==================== */
 .fishbone-page {
   width: 100%;
   height: 100%;
@@ -872,7 +786,6 @@ onBeforeUnmount(() => {
   position: relative;
 }
 
-/* ==================== 加载遮罩 ==================== */
 .fishbone-loading {
   position: absolute;
   inset: 0;
@@ -883,7 +796,6 @@ onBeforeUnmount(() => {
   background: rgba(255, 255, 255, 0.7);
 }
 
-/* ==================== 右上角缩放百分比 ==================== */
 .scale-text {
   position: absolute;
   top: 12px;
@@ -894,7 +806,6 @@ onBeforeUnmount(() => {
   user-select: none;
 }
 
-/* ==================== 缩放控件 ==================== */
 .zoom-control {
   display: flex;
   align-items: center;
@@ -918,7 +829,6 @@ onBeforeUnmount(() => {
   color: #0e42d2;
 }
 
-/* ==================== 底部操作栏 ==================== */
 .fishbone-footer {
   display: flex;
   align-items: center;
@@ -935,7 +845,6 @@ onBeforeUnmount(() => {
   gap: 8px;
 }
 
-/* ==================== 视口 + 世界容器 ==================== */
 .fishbone-viewport {
   flex: 1;
   overflow: hidden;
@@ -951,7 +860,6 @@ onBeforeUnmount(() => {
   will-change: transform;
 }
 
-/* ==================== 鱼头鱼尾 ==================== */
 .fish-part {
   position: absolute;
   z-index: 8;
@@ -1000,7 +908,6 @@ onBeforeUnmount(() => {
   box-shadow: none;
 }
 
-/* ==================== 骨骼编辑覆盖层 ==================== */
 .inline-edit-wrap {
   position: absolute;
   z-index: 10;
@@ -1046,13 +953,11 @@ onBeforeUnmount(() => {
   line-height: 1.4;
 }
 
-/* 大骨标签无边框（与背景融为一体） */
 .inline-edit-big .inline-edit-input,
 .inline-edit-big .inline-edit-label {
   border: none;
 }
 
-/* 删除按钮（红色圆点 ×） */
 .inline-edit-del {
   position: absolute;
   top: -8px;

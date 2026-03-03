@@ -1,100 +1,68 @@
-/**
- * 鱼骨图布局计算模块
- * 负责：尺寸计算、坐标定位、画布边界计算等
- */
+// 布局常量
+export const LINE_CHARS = 10       // 每行最多字符数，超过换行
+export const BIG_GAP = 100         // 大骨最小宽度
+export const DIAG = 150            // 大骨斜线默认长度
+export const MID_LEN = 90          // 中骨水平线默认长度
+export const PAIR_GAP = 60         // 上下两根大骨的间距
+export const PAD_L = 70            // 画布左侧留白
+export const TAIL = 50             // 鱼尾到主骨线的距离
+export const CY = 350              // 主骨线 Y 坐标
+export const EMPTY_OFFSET_X = -250 // 空图时整体偏移
+export const BTN_SIZE = 20        // 加号按钮尺寸
 
-// ═══════════════════════════════════════════════════════════
-// 常量配置
-// ═══════════════════════════════════════════════════════════
-export const LINE_CHARS = 10            // 每行最多字符数（超过则换行）
-export const BIG_GAP   = 100   // 大骨最小宽度
-export const DIAG      = 150   // 大骨斜线的默认长度（无中骨时）
-export const MID_LEN   = 90    // 中骨水平线长度
-export const PAIR_GAP  = 60    // 同组上下两根大骨的主骨线间距
-export const PAD_L     = 70    // 画布左侧留白
-export const TAIL      = 50    // 鱼尾到主骨线起点的距离
-export const CY        = 350   // 主骨线的 Y 坐标（画布上的垂直中心）
-
-// 空图时的布局常量（渲染空图时使用）
-export const EMPTY_MAIN_EXTRA = 50   // 空图时主骨线额外增加的长度
-export const EMPTY_OFFSET_X  = -250  // 空图时整体向左的偏移量（负值向左）
-export const EMPTY_FISH_SCALE_BASE = 2.0 // 空图时鱼头/鱼尾的基础缩放
-
-// 方框尺寸常量
-const SM_BOX_MIN_W = 80,  SM_BOX_H = 24, SM_GAP_Y = 8   // 小骨方框: 高24px
-const MID_BOX_MIN_W = 100, MID_BOX_H = 24               // 中骨方框: 高24px
-const BIG_BOX_MIN_W = 120, BIG_BOX_H = 32               // 大骨方框: 高32px
-const SM_LINK_LEN = 40    // 小骨到中骨方框的连线长度
-const GROUP_GAP = 30             // 相邻大骨组之间的基础间距
-const HEAD_TO_FIRST_BONE = 0 // 鱼头到第一组大骨节点的固定距离（极大缩短）
-export const BTN_SIZE = 20    // 加号按钮尺寸（统一尺寸，方便修改）
-
-/**
- * 布局计算入口函数
- * @param {Object} fishData - 鱼骨图数据
- * @returns {Object} 布局结果 { slots, canvasW, canvasH, shiftedMainEnd, cy, shiftX, shiftY, fishScale, ... }
- */
+// 计算布局入口
 export function calculateLayout(fishData) {
   const isEmpty = !fishData.bigBones || fishData.bigBones.length === 0
-  // ═══════════════════════════════════════════════════════════
-  // 11a. 方框尺寸常量（内部使用）
-  // ═══════════════════════════════════════════════════════════════════
-  const SM_BOX_MIN_Wi = 80,  SM_BOX_Hi = 24, SM_GAP_Yi = 8
-  const MID_BOX_MIN_Wi = 100, MID_BOX_Hi = 24
-  const BIG_BOX_MIN_Wi = 120, BIG_BOX_Hi = 32
 
-  // ═══════════════════════════════════════════════════════════
-  // 11b. 尺寸计算辅助函数
-  // ═══════════════════════════════════════════════════════════
+  // 内部常量
+  const SM_BOX_H = 24, SM_GAP_Y = 8   // 小骨方框高度、间距
+  const MID_BOX_H = 24                  // 中骨方框高度
+  const BIG_BOX_H = 32                  // 大骨方框高度
+  const SM_LINK_LEN = 40                // 小骨连线长度
+  const GROUP_GAP = 30                   // 大骨组间距
 
-  /** 单个小骨方框高度（超过 LINE_CHARS 则换行增高） */
+  // 小骨方框高度，超过10字换行时增高
   function smBoxH(sm) {
-    return sm.label.length > LINE_CHARS ? SM_BOX_Hi * 1.8 : SM_BOX_Hi
+    return sm.label.length > LINE_CHARS ? SM_BOX_H * 1.8 : SM_BOX_H
   }
 
-  /** 单个中骨方框高度（超过 LINE_CHARS 则换行增高） */
+  // 中骨方框高度，超过10字换行时增高
   function midBoxH(m) {
-    return m.label.length > LINE_CHARS ? MID_BOX_Hi * 1.8 : MID_BOX_Hi
+    return m.label.length > LINE_CHARS ? MID_BOX_H * 1.8 : MID_BOX_H
   }
 
-  /** 单个大骨方框高度（超过 LINE_CHARS 则换行增高） */
+  // 大骨方框高度，超过10字换行时增高
   function bigBoxH(b) {
-    return b.label.length > LINE_CHARS ? BIG_BOX_Hi * 1.8 : BIG_BOX_Hi
+    return b.label.length > LINE_CHARS ? BIG_BOX_H * 1.8 : BIG_BOX_H
   }
 
-  /** 一根中骨下所有小骨的总高度（含间距） */
+  // 中骨下所有小骨的总高度
   function totalSmallBonesH(m) {
     if (m.smallBones.length === 0) return 0
     let h = 0
     for (let j = 0; j < m.smallBones.length; j++) {
-      if (j > 0) h += SM_GAP_Yi
+      if (j > 0) h += SM_GAP_Y
       h += smBoxH(m.smallBones[j])
     }
     return h
   }
 
-  /**
-   * 中骨沿大骨斜线方向占用的间距。
-   * 需要足够容纳该中骨的小骨群垂直高度。
-   * 因为斜线是 45°，Y轴间距 = span/√2，所以 span 要乘以 √2 补偿。
-   */
+  // 中骨沿斜线方向占用的间距
   function midBoneSpan(m) {
-    const midH = midBoxH(m)  // 中骨自身高度（考虑换行）
+    const midH = midBoxH(m)
     const smH = totalSmallBonesH(m)
     const needed = Math.max(midH + 20, smH + midH)
     return Math.ceil(needed * Math.SQRT2)
   }
 
-  /** 大骨斜线顶端（靠近主骨侧）给大骨标签留的空间 */
+  // 大骨斜线顶端留白
   function calcHeadMargin(b) {
-    const bigH = bigBoxH(b)  // 大骨自身高度（考虑换行）
+    const bigH = bigBoxH(b)
     if (b.midBones.length === 0) return Math.max(80, bigH + 40)
     return Math.max(80, bigH + 40)
   }
 
-  /**
-   * 大骨斜线总长度 = 顶端留白 + 所有中骨间距之和 + 底端留白。
-   */
+  // 大骨斜线总长度
   function calcDiag(b) {
     if (b.midBones.length === 0) return DIAG
     const headMargin = calcHeadMargin(b)
@@ -105,33 +73,25 @@ export function calculateLayout(fishData) {
     return Math.max(DIAG, total)
   }
 
-  function midLen() { return MID_LEN }
-
-  /**
-   * 动态计算中骨横向长度。
-   * 根据该中骨下小骨的总高度动态调整，避免小骨与中骨碰撞。
-   * 小骨越多，中骨需要横向延伸更长。
-   */
+  // 动态计算中骨横向长度
   function calcDynamicMidLen(m) {
     const smH = totalSmallBonesH(m)
     if (smH === 0) return MID_LEN
-    // 小骨高度的一半作为额外需要避让的距离
-    const extra = smH / 2
-    return MID_LEN + extra
+    return MID_LEN + smH / 2
   }
 
-  /** 根据文字计算方框宽度 */
+  // 根据文字计算方框宽度
   function calcBoxW(text, fs = 11) {
     const len = text.length
     const lineW = Math.min(len, LINE_CHARS) * (fs * 1.0) + 20
-    return Math.max(lineW, 50)
+    return Math.max(lineW, 80)
   }
 
-  function smBoxW(sm)  { return calcBoxW(sm.label, 12) }
-  function midBoxW(m)  { return calcBoxW(m.label, 13) }
-  function bigBoxW(b)  { return calcBoxW(b.label, 14) }
+  function smBoxW(sm) { return calcBoxW(sm.label, 12) }
+  function midBoxW(m) { return calcBoxW(m.label, 13) }
+  function bigBoxW(b) { return calcBoxW(b.label, 14) }
 
-  /** 一根中骨下所有小骨方框的最大宽度 */
+  // 中骨下所有小骨方框的最大宽度
   function maxSmBoxW(m) {
     if (m.smallBones.length === 0) return 0
     let mx = 0
@@ -139,9 +99,7 @@ export function calculateLayout(fishData) {
     return mx
   }
 
-  /**
-   * 大骨从主骨交点(bx)向左延伸的最大距离。
-   */
+  // 大骨从主骨交点向左延伸的最大距离
   function boneLeftExtent(b) {
     const dynamicDiag = calcDiag(b)
     const dd = dynamicDiag / Math.SQRT2
@@ -162,13 +120,12 @@ export function calculateLayout(fishData) {
     return maxLeft
   }
 
+  // 大骨宽度
   function boneW(b) {
     return Math.max(BIG_GAP, boneLeftExtent(b) + 40)
   }
 
-  // ═══════════════════════════════════════════════════════════
-  // 11c. 大骨分组 & 主骨线布局
-  // ═══════════════════════════════════════════════════════════
+  // 大骨分组，每组最多上下两根
   const groups = []
   for (let i = 0; i < fishData.bigBones.length; i += 2) {
     const top = fishData.bigBones[i]
@@ -176,6 +133,7 @@ export function calculateLayout(fishData) {
     groups.push({ top, bot })
   }
 
+  // 计算每组宽度
   const groupWidths = groups.map(g => {
     const wTop = boneW(g.top)
     const wBot = g.bot ? boneW(g.bot) : 0
@@ -184,7 +142,7 @@ export function calculateLayout(fishData) {
 
   const tailSafeRight = PAD_L + TAIL + 50
 
-  // 计算每组相对于第一组的向左偏移量
+  // 计算每组相对偏移
   const relOffsets = []
   let cursor = 0
   for (let gi = 0; gi < groupWidths.length; gi++) {
@@ -206,35 +164,26 @@ export function calculateLayout(fishData) {
     }
   }
 
-  // 确定第一组 top 节点的绝对 X
-  // 需要确保最左侧大骨的中骨/小骨文字框与鱼尾保持固定间距 50px
-  const TAIL_GAP = 150  // 左侧第一组大骨的中骨/小骨文字框与鱼尾的固定间距
+  // 第一根大骨的 X 坐标
+  const TAIL_GAP = 150
   let firstBoneX = tailSafeRight
   for (let gi = 0; gi < groups.length; gi++) {
     const g = groups[gi]
     const topExt = boneLeftExtent(g.top)
     const botExt = g.bot ? boneLeftExtent(g.bot) + PAIR_GAP : 0
     const needed = relOffsets[gi] + Math.max(topExt, botExt)
-    
-    // 确保第一组大骨的中骨/小骨文字框与鱼尾保持固定间距 50px
-    // 文字框左边界 = bx - boneLeftExtent(b)，需要 >= tailSafeRight + TAIL_GAP
     if (gi === 0) {
-      // 需要同时考虑 top 和 bot 大骨的 leftExtent，确保两者都有足够空间
       const minFirstBoneX = tailSafeRight + TAIL_GAP + Math.max(topExt, botExt)
       firstBoneX = Math.max(firstBoneX, minFirstBoneX)
     } else {
-      // 所有组都需要与鱼尾保持固定间距
       firstBoneX = Math.max(firstBoneX, tailSafeRight + TAIL_GAP + needed)
     }
   }
 
-  let mainEnd = firstBoneX + HEAD_TO_FIRST_BONE
+  let mainEnd = firstBoneX
+  if (isEmpty) mainEnd += 50
 
-  // 空图时：让主骨线静态加长，避免鱼头太靠近画布中心
-  if (isEmpty) {
-    mainEnd += EMPTY_MAIN_EXTRA
-  }
-
+  // 生成槽位信息
   const slots = []
   for (let gi = 0; gi < groups.length; gi++) {
     const g = groups[gi]
@@ -245,9 +194,7 @@ export function calculateLayout(fishData) {
     }
   }
 
-  // ═══════════════════════════════════════════════════════════
-  // 11d. 计算画布边界（遍历所有骨骼找极值）
-  // ═══════════════════════════════════════════════════════════
+  // 计算画布边界
   let xMin = PAD_L - 20, xMax = mainEnd + 20
   let yMin = CY, yMax = CY
 
@@ -289,28 +236,19 @@ export function calculateLayout(fishData) {
     }
   }
 
-  // 如果有元素超出左侧/上侧，整体平移画布
+  // 整体偏移
   let shiftX = xMin < tailSafeRight ? tailSafeRight - xMin : 0
   const shiftY = yMin < 0 ? -yMin + 40 : 0
 
   const shiftedMainEnd = mainEnd + shiftX
-
-  // 关键：不使用 rightmost 推远 shiftedMainEnd，让鱼头更靠近最后的大骨节点
-  // const rightmost = xMax + shiftX + 20
-  // if (rightmost > shiftedMainEnd) shiftedMainEnd = rightmost
   const cy = CY + shiftY
 
-  // ═══════════════════════════════════════════════════════════
-  // 11e. 鱼头鱼尾动态缩放
-  // ═══════════════════════════════════════════════════════════
-  const FISH_SCALE_BASE = isEmpty ? EMPTY_FISH_SCALE_BASE : 1.6
-  const FISH_SCALE_MAX  = 2.5
+  // 鱼头鱼尾缩放
+  const FISH_SCALE_BASE = isEmpty ? 2.0 : 1.6
+  const FISH_SCALE_MAX = 2.5
   const totalMidCount = fishData.bigBones.reduce((sum, b) => sum + b.midBones.length, 0)
   const FISH_SCALE = Math.min(FISH_SCALE_MAX, FISH_SCALE_BASE + totalMidCount * 0.12)
 
-  // ═══════════════════════════════════════════════════════════
-  // 11f. 计算画布尺寸
-  // ═══════════════════════════════════════════════════════════
   const PAD = 40
   const HEAD_SVG_W = 120 * FISH_SCALE, HEAD_SVG_H = 120 * FISH_SCALE
   const TAIL_SVG_W = 120 * FISH_SCALE, TAIL_SVG_H = 120 * FISH_SCALE
@@ -318,21 +256,12 @@ export function calculateLayout(fishData) {
   const canvasW = Math.max(shiftedMainEnd + HEAD_SVG_W + 40, 900)
   const canvasH = Math.max(yMax + shiftY + PAD, Math.max(TAIL_SVG_H, HEAD_SVG_H) + 100, 700)
 
-  // ═══════════════════════════════════════════════════════════
-  // 返回布局结果
-  // ═══════════════════════════════════════════════════════════
   return {
-    // 布局常量
-    SM_BOX_MIN_W: SM_BOX_MIN_Wi,
-    SM_BOX_H: SM_BOX_Hi,
-    SM_GAP_Y: SM_GAP_Yi,
-    MID_BOX_MIN_W: MID_BOX_MIN_Wi,
-    MID_BOX_H: MID_BOX_Hi,
-    BIG_BOX_MIN_W: BIG_BOX_MIN_Wi,
-    BIG_BOX_H: BIG_BOX_Hi,
+    SM_BOX_H,
+    SM_GAP_Y,
+    MID_BOX_H,
+    BIG_BOX_H,
     SM_LINK_LEN,
-    MID_BOX_MIN_Wi,
-    // 辅助函数
     smBoxH,
     midBoxH,
     bigBoxH,
@@ -344,9 +273,7 @@ export function calculateLayout(fishData) {
     midBoxW,
     bigBoxW,
     maxSmBoxW,
-    midLen,
     calcDynamicMidLen,
-    // 布局结果
     slots,
     canvasW,
     canvasH,
@@ -355,49 +282,9 @@ export function calculateLayout(fishData) {
     shiftX,
     shiftY,
     FISH_SCALE,
-    fishScale: FISH_SCALE,  // 兼容别名
     HEAD_SVG_W,
     HEAD_SVG_H,
     TAIL_SVG_W,
     TAIL_SVG_H,
   }
-}
-
-/**
- * 计算大骨在斜线上的锚点坐标
- */
-export function getBigBoneAnchor(bx, cy, b, calcDiag) {
-  const dynamicDiag = calcDiag(b)
-  const dd = dynamicDiag / Math.SQRT2
-  const dir = b.position === 'top' ? -1 : 1
-  const sx = bx, sy = cy
-  const ex = bx - dd, ey = cy + dir * dd
-  return { sx, sy, ex, ey, dd, dir, dynamicDiag }
-}
-
-/**
- * 计算中骨在斜线上的锚点坐标
- */
-export function getMidBoneAnchor(bx, cy, b, m, layout) {
-  const { calcDiag, calcHeadMargin, midBoneSpan, midLen, midBoxW, smBoxW, totalSmallBonesH, smBoxH, SM_GAP_Y, maxSmBoxW } = layout
-  
-  const dynamicDiag = calcDiag(b)
-  const dir = b.position === 'top' ? -1 : 1
-  const dd = dynamicDiag / Math.SQRT2
-  const sx = bx, sy = cy
-  const ex = bx - dd, ey = cy + dir * dd
-
-  let accumOffset = calcHeadMargin(b)
-  const midIndex = b.midBones.indexOf(m)
-  for (let i = 0; i < midIndex; i++) {
-    accumOffset += midBoneSpan(b.midBones[i])
-  }
-  
-  const span = midBoneSpan(m)
-  const centerOffset = accumOffset + span / 2
-  const t = centerOffset / dynamicDiag
-  const ax = sx + (ex - sx) * t
-  const ay = sy + (ey - sy) * t
-
-  return { ax, ay, t, dynamicMidLen: calcDynamicMidLen(m), mex: ax - calcDynamicMidLen(m) }
 }
