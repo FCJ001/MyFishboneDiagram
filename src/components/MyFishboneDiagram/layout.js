@@ -73,11 +73,13 @@ export function calculateLayout(fishData) {
     return Math.max(DIAG, total)
   }
 
-  // 动态计算中骨横向长度
+  // 动态计算中骨横向长度（至少要能容纳中骨方框宽度，字体大小14对应渲染时的字体大小）
   function calcDynamicMidLen(m) {
     const smH = totalSmallBonesH(m)
-    if (smH === 0) return MID_LEN
-    return MID_LEN + smH / 2
+    const boxW = calcBoxW(m.label, 14)
+    const baseLen = Math.max(MID_LEN, boxW) + 5
+    if (smH === 0) return baseLen
+    return baseLen + smH / 2
   }
 
   // 根据文字计算方框宽度
@@ -88,7 +90,7 @@ export function calculateLayout(fishData) {
   }
 
   function smBoxW(sm) { return calcBoxW(sm.label, 12) }
-  function midBoxW(m) { return calcBoxW(m.label, 13) }
+  function midBoxW(m) { return calcBoxW(m.label, 14) }  // 使用14，与渲染时的字体大小一致
   function bigBoxW(b) { return calcBoxW(b.label, 14) }
 
   // 中骨下所有小骨方框的最大宽度

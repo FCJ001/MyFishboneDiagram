@@ -473,7 +473,7 @@ function renderGraph() {
 
       // 中骨标签
       const mlw = midBoxW(m), mlh = midBoxH(m)
-      const midBoxX = mex - mlw
+      const midBoxX = mex - mlw + 2
       const midBoxY = ay - mlh / 2
       addLabelNode(
         `mid_label_${m.id}`, midBoxX, midBoxY, mlw, mlh, m.label,
