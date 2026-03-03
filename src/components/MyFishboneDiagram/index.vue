@@ -246,6 +246,19 @@ function onOverlayMouseEnter(ov) {
   }
 }
 
+// 处理详情模式下的骨骼标签显示：10字换行，最多20字
+function getDisplayLabel(text) {
+  let label = text || ''
+  if (label.length > 20) {
+    label = label.slice(0, 20)
+  }
+  // 详情模式或编辑模式的非hover状态，超过10字时换行
+  if ((mode.value === 'view' || mode.value === 'edit') && label.length > 10) {
+    return label.slice(0, 10) + '\n' + label.slice(10)
+  }
+  return label
+}
+
 function onOverlayMouseLeave(ov) {
   if (hoveringOverlayId.value === ov.id) {
     hoveringOverlayId.value = null
@@ -300,8 +313,21 @@ const fishData = reactive({ bigBones: [] })
 const headLabel = ref('问题详情')
 const headHovering = ref(false)
 const headInputRef = ref(null)
-const headFontSize = ref(16)      // 随鱼头缩放动态调整
+const headFontSize = ref(14)      // 随鱼头缩放动态调整
 const headTextWidth = ref(72)     // 随鱼头缩放动态调整
+
+// 详情模式鱼头文本处理：10字换行，最多20字
+const displayHeadLabel = computed(() => {
+  let text = headLabel.value
+  if (text.length > 20) {
+    text = text.slice(0, 20)
+  }
+  // 详情模式或编辑模式的非hover状态，超过10字时换行
+  if ((mode.value === 'view' || (mode.value === 'edit' && !headHovering.value)) && text.length > 10) {
+    return text.slice(0, 10) + '\n' + text.slice(10)
+  }
+  return text
+})
 
 // 鱼头/鱼尾位置尺寸
 const headPos = reactive({ x: 0, y: 0, w: 0, h: 0 })
@@ -390,7 +416,7 @@ function renderGraph() {
   const {
     slots, canvasW, canvasH, shiftedMainEnd, cy, shiftX, shiftY,
     FISH_SCALE, HEAD_SVG_W, HEAD_SVG_H, TAIL_SVG_W, TAIL_SVG_H,
-    smBoxH, totalSmallBonesH, midBoneSpan, calcHeadMargin, calcDiag,
+    smBoxH, midBoxH, bigBoxH, totalSmallBonesH, midBoneSpan, calcHeadMargin, calcDiag,
     smBoxW, midBoxW, bigBoxW, maxSmBoxW, BIG_BOX_H, MID_BOX_H, SM_LINK_LEN, SM_GAP_Y,
     calcDynamicMidLen,
   } = layout
@@ -420,7 +446,7 @@ function renderGraph() {
 
   // 鱼头文字尺寸随缩放联动
   const FISH_SCALE_BASE = 1.6
-  headFontSize.value = Math.round(16 * (FISH_SCALE / FISH_SCALE_BASE))
+  headFontSize.value = Math.round(14 * (FISH_SCALE / FISH_SCALE_BASE))
   headTextWidth.value = Math.round(72 * (FISH_SCALE / FISH_SCALE_BASE))
 
   graph.on('node:click', ({ node }) => {
@@ -466,12 +492,12 @@ function renderGraph() {
     const ex = bx - dd, ey = cy + dir * dd   // 终点（斜线末端）
 
     // 大骨标签方框（放在斜线末端）
-    const lw = bigBoxW(b), lh = BIG_BOX_H
+    const lw = bigBoxW(b), lh = bigBoxH(b)
     const boxX = ex - lw / 2
     const boxY = dir === -1 ? ey - lh : ey
     addLabelNode(
       `big_label_${b.id}`, boxX, boxY, lw, lh, b.label,
-      boneColor, 'transparent', '#FFFFFF', 24, 600, 0,
+      boneColor, 'transparent', '#FFFFFF', 14, 500, 4,
       b, { type: 'big', bigId: b.id }, dir,
     )
 
@@ -505,12 +531,12 @@ function renderGraph() {
       addEdge([ax, ay], [mex, ay], boneColor, 2)
 
       // 中骨方框（紧接水平线左端）
-      const mlw = midBoxW(m), mlh = MID_BOX_H
+      const mlw = midBoxW(m), mlh = midBoxH(m)
       const midBoxX = mex - mlw
       const midBoxY = ay - mlh / 2
       addLabelNode(
         `mid_label_${m.id}`, midBoxX, midBoxY, mlw, mlh, m.label,
-        boneColor, boneColor, '#FFFFFF', 20, 500, 16,
+        boneColor, boneColor, '#FFFFFF', 14, 500, 30,
         m, { type: 'mid', bigId: b.id, midId: m.id },
       )
 
@@ -541,7 +567,7 @@ function renderGraph() {
           addEdge([lineOriginX, ay], [smBoxRightX, smBoxCenterY], boneColor, 1)
           addLabelNode(
             `sm_label_${sm.id}`, smBoxRightX - sw, smStartY, sw, sh, sm.label,
-            'transparent', boneColor, '#1D2129', 18, 400, 16,
+            'transparent', boneColor, '#1D2129', 12, 400, 30,
             sm, { type: 'small', bigId: b.id, midId: m.id, smId: sm.id },
           )
         } else {
@@ -559,7 +585,7 @@ function renderGraph() {
 
             addLabelNode(
               `sm_label_${sm.id}`, smBoxRightX - sw, curY, sw, sh, sm.label,
-              'transparent', boneColor, '#1D2129', 18, 400, 16,
+              'transparent', boneColor, '#1D2129', 12, 400, 30,
               sm, { type: 'small', bigId: b.id, midId: m.id, smId: sm.id },
             )
             curY += sh + SM_GAP_Y
@@ -718,7 +744,7 @@ onBeforeUnmount(() => {
           <!-- 鱼头标签：hover 切换为 input 编辑 -->
           <div
             class="fish-head-label"
-            :title="headLabel"
+            :title="mode === 'view' ? '' : headLabel"
             @mouseenter="onHeadMouseEnter"
             @mouseleave="onHeadMouseLeave"
           >
@@ -736,7 +762,7 @@ onBeforeUnmount(() => {
               v-else
               class="fish-head-text"
               :style="{ width: headTextWidth + 'px', fontSize: headFontSize + 'px' }"
-            >{{ headLabel }}</span>
+            >{{ displayHeadLabel }}</span>
           </div>
         </div>
 
@@ -755,7 +781,7 @@ onBeforeUnmount(() => {
           @mouseleave="onOverlayMouseLeave(ov)"
         >
           <input
-            v-if="hoveringOverlayId === ov.id"
+            v-if="hoveringOverlayId === ov.id && mode === 'edit'"
             :id="'edit-input-' + ov.id"
             class="inline-edit-input"
             :style="{
@@ -782,10 +808,10 @@ onBeforeUnmount(() => {
               borderColor: ov.border,
               borderRadius: ov.rx + 'px',
             }"
-            :title="ov.boneRef.label"
-          >{{ ov.boneRef.label }}</div>
+            :title="mode === 'view' ? '' : ov.boneRef.label"
+          >{{ getDisplayLabel(ov.boneRef.label) }}</div>
           <span
-            v-if="ov.delInfo"
+            v-if="ov.delInfo && mode === 'edit'"
             class="inline-edit-del"
             @mousedown.prevent.stop="deleteBone(ov.delInfo)"
           >&times;</span>
@@ -935,11 +961,9 @@ onBeforeUnmount(() => {
   color: #fff;
   text-align: center;
   line-height: 1.4;
-  display: -webkit-box;
-  -webkit-line-clamp: 4;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+  display: block;
   word-break: break-all;
+  white-space: pre-wrap;
   cursor: default;
 }
 .fish-head-input {
@@ -966,21 +990,26 @@ onBeforeUnmount(() => {
 .inline-edit-wrap {
   position: absolute;
   z-index: 10;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 .inline-edit-input {
   width: 100%;
   height: 100%;
-  border: 1px solid;
-  padding: 0 6px;
+  border: 1.2px solid;
+  padding: 2px 6px;
   text-align: center;
   outline: none;
   box-sizing: border-box;
-  overflow: hidden;
-  text-overflow: ellipsis;
   cursor: text;
   user-select: text;
-  line-height: 1.4;
   font-family: inherit;
+  word-break: break-all;
+  border-radius: inherit;
+  background-color: transparent;
+  line-height: inherit;
 }
 .inline-edit-input:focus {
   box-shadow: 0 0 0 2px rgba(22, 93, 255, 0.2);
@@ -988,17 +1017,19 @@ onBeforeUnmount(() => {
 .inline-edit-label {
   width: 100%;
   height: 100%;
-  border: 1px solid;
-  padding: 0 6px;
+  border: 1.2px solid;
+  padding: 2px 6px;
   text-align: center;
   box-sizing: border-box;
-  overflow: hidden;
+  overflow: visible;
+  word-break: break-all;
+  white-space: pre-wrap;
+  cursor: default;
+  border-radius: inherit;
   display: flex;
   align-items: center;
   justify-content: center;
-  line-height: 1.3;
-  word-break: break-all;
-  cursor: default;
+  line-height: 1.4;
 }
 
 /* 大骨标签无边框（与背景融为一体） */

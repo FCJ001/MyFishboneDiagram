@@ -69,8 +69,8 @@ export function createDrawer({ graph, mode, editOverlays, callbackMap, LINE_CHAR
 
   /**
    * 添加带文本的矩形节点。
-   * 编辑模式下不画 X6 节点，而是把信息推入 editOverlays 数组，
-   * 由 Vue template 渲染为可交互的 HTML overlay。
+   * 现在统一使用 HTML overlay（编辑/详情两种模式都一样），
+   * 由 Vue template 渲染，保证样式完全一致。
    *
    * @param growDir  文本超长时方框的扩展方向：-1=向上扩展, 1=向下, 0=居中扩展
    */
@@ -89,24 +89,35 @@ export function createDrawer({ graph, mode, editOverlays, callbackMap, LINE_CHAR
       else if (growDir === 1) displayY = y
       else displayY = y - extra / 2
     }
-    if (mode.value === 'edit' && boneRef) {
+
+    // 所有骨骼标签（有 boneRef 的）统一走 HTML overlay 渲染，
+    // 这样编辑模式和详情模式的圆角、边框、内边距完全一致。
+    if (boneRef) {
       editOverlays.value.push({
         id, x, y: displayY, w, h: displayH,
         boneRef, bg, border, fg, fs, fw, rx, delInfo, boneType,
       })
-    } else {
-      graph.addNode({
-        id, shape: 'rect',
-        x, y: displayY, width: w, height: displayH,
-        attrs: {
-          body: { fill: bg, stroke: border, strokeWidth: 1.2, rx, ry: rx },
-          label: {
-            text, fill: fg, fontSize: fs, fontWeight: fw,
-            textWrap: { width: w - 12, height: displayH - 4, ellipsis: true },
-          },
-        },
-      })
+      return
     }
+
+    // 预留：没有 boneRef 的情况仍然用 X6 自己的节点渲染（当前未使用）
+    graph.addNode({
+      id,
+      shape: 'rect',
+      x,
+      y: displayY,
+      width: w,
+      height: displayH,
+      attrs: {
+        body: { fill: bg, stroke: border, strokeWidth: 1.2, rx, ry: rx },
+        label: {
+          text,
+          fill: fg,
+          fontSize: fs,
+          fontWeight: fw,
+        },
+      },
+    })
   }
 
   /** 添加加号按钮节点（仅编辑模式可见） */
