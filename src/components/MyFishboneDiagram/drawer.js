@@ -148,10 +148,11 @@ export function createDrawer({ graph, mode, editOverlays, callbackMap, LINE_CHAR
 }
 
 /**
- * 颜色配置
+ * 颜色配置（10种颜色循环）
  */
 export const BONE_COLORS = [
-  '#E96F56', '#668FF5', '#00A0C8', '#BB8C00', '#00A68D',
+  '#B37DD8', '#6C9E42', '#D77D1E', '#8793B9', '#CE75B8',
+  '#668FF5', '#00A0C8', '#BB8C00', '#00A68D', '#E96F56',
 ]
 
 /**

@@ -153,8 +153,8 @@ const panY = ref(0)              // 当前垂直偏移
 const scale = ref(1)             // 当前缩放比例
 const baseScale = ref(1)          // 基准缩放比例（首次渲染时自动计算，用于百分比显示）
 const isFirstRender = ref(true)  // 是否首次渲染（用于显示100%）
-const SCALE_MIN = 0.3
-const SCALE_MAX = 2
+const SCALE_MIN = 0.001
+const SCALE_MAX = 1000
 let isPanning = false            // 是否正在拖拽
 let panStartX = 0                // 拖拽起始鼠标 X
 let panStartY = 0                // 拖拽起始鼠标 Y
@@ -210,20 +210,27 @@ function onWheel(e) {
 // ═══════════════════════════════════════════════════════════
 // 4. 编辑 / 详情 模式 & 文本参数
 // ═══════════════════════════════════════════════════════════
-const mode = ref('edit')         // 'edit' = 编辑模式, 'view' = 只读详情
+const mode = defineModel({ default: 'edit' }) // 'edit' = 编辑模式, 'view' = 只读详情
 const editOverlays = ref([])     // 编辑模式下的 HTML 覆盖层列表
 const MAX_CHARS = 20             // 每个标签最多字符数
 
 // ═══════════════════════════════════════════════════════════
 // 6. 骨骼标签的 hover 编辑（大骨/中骨/小骨）
 //    原理：鼠标移入时将 overlay div 切换为 input，
-//          移出或失焦时恢复为文本并重绘。
+//          移出或失焦时恢复为文本并重绘（仅当数据变化时）。
 // ═══════════════════════════════════════════════════════════
 const hoveringOverlayId = ref(null)
+const originalLabel = ref('') // 保存编辑前的原始值
 
 function onOverlayBlur() {
+  const currentLabel = hoveringOverlayId.value
+    ? editOverlays.value.find(ov => ov.id === hoveringOverlayId.value)?.boneRef.label
+    : ''
+  // 只有当数据变化时才重绘
+  if (currentLabel !== originalLabel.value) {
+    renderGraph()
+  }
   hoveringOverlayId.value = null
-  renderGraph()
 }
 
 function onOverlayInput(e, ov) {
@@ -238,6 +245,7 @@ function onOverlayInput(e, ov) {
 
 function onOverlayMouseEnter(ov) {
   if (mode.value === 'edit') {
+    originalLabel.value = ov.boneRef.label // 保存原始值
     hoveringOverlayId.value = ov.id
     nextTick(() => {
       const el = document.querySelector(`#edit-input-${ov.id}`)
@@ -332,13 +340,19 @@ const displayHeadLabel = computed(() => {
 // 鱼头/鱼尾位置尺寸
 const headPos = reactive({ x: 0, y: 0, w: 0, h: 0 })
 const tailPos = reactive({ x: 0, y: 0, w: 0, h: 0 })
+const originalHeadLabel = ref('') // 保存鱼头原始值
 
 function onHeadMouseEnter() {
   if (mode.value !== 'edit') return
+  originalHeadLabel.value = headLabel.value // 保存原始值
   headHovering.value = true
   nextTick(() => { headInputRef.value?.focus() })
 }
 function onHeadMouseLeave() {
+  // 只有当数据变化时才重绘
+  if (headLabel.value !== originalHeadLabel.value) {
+    renderGraph()
+  }
   headHovering.value = false
 }
 function onHeadInput(e) {

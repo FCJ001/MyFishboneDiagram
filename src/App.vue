@@ -4,6 +4,7 @@ import FishboneDiagram from './components/MyFishboneDiagram/index.vue'
 
 const showFishbone = ref(false)
 const fishboneRef = ref(null)
+const mode = ref('edit') // 'edit' = 编辑模式, 'view' = 只读模式
 
 /** 模拟后端 API 返回的鱼骨图数据 */
 function mockFetchFishboneData() {
@@ -84,6 +85,7 @@ function onCancel() { showFishbone.value = false }
     >
       <FishboneDiagram
         ref="fishboneRef"
+        v-model:mode="mode"
         @confirm="onConfirm"
         @cancel="onCancel"
       />

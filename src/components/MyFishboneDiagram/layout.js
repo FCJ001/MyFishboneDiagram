@@ -16,7 +16,7 @@ export const TAIL      = 50    // 鱼尾到主骨线起点的距离
 export const CY        = 350   // 主骨线的 Y 坐标（画布上的垂直中心）
 
 // 空图时的布局常量（渲染空图时使用）
-export const EMPTY_MAIN_EXTRA = 200   // 空图时主骨线额外增加的长度
+export const EMPTY_MAIN_EXTRA = 50   // 空图时主骨线额外增加的长度
 export const EMPTY_OFFSET_X  = -250  // 空图时整体向左的偏移量（负值向左）
 export const EMPTY_FISH_SCALE_BASE = 2.0 // 空图时鱼头/鱼尾的基础缩放
 
