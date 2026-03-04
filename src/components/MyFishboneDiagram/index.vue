@@ -3,7 +3,7 @@
 import { ref, reactive, onMounted, onBeforeUnmount, nextTick, computed } from 'vue'
 import { Graph } from '@antv/x6'
 import { IconZoomIn, IconZoomOut, IconOriginalSize } from '@arco-design/web-vue/es/icon'
-import { calculateLayout, LINE_CHARS, PAD_L, TAIL, EMPTY_OFFSET_X, BTN_HIT_SIZE, CENTER_OFFSET_Y } from './layout'
+import { calculateLayout, LINE_CHARS, PAD_L, TAIL, EMPTY_OFFSET_X, BTN_HIT_SIZE, CENTER_OFFSET_Y, FISH_SCALE_BASE, CENTER_PADDING, INIT_RENDER_MAX_RETRIES } from './layout'
 import { createDrawer, getBoneColor } from './drawer'
 
 // 事件
@@ -34,13 +34,15 @@ async function init(dataOrPromise) {
   } else if (dataOrPromise) {
     setData(dataOrPromise)
   }
-  // 等待 DOM 准备好后渲染
+  // 等待 DOM 准备好后渲染，带重试上限避免死循环
+  let retries = 0
   const tryRender = () => {
     const c = containerRef.value
     const vp = viewportRef.value
     if (c && vp && vp.clientHeight > 0) {
       renderGraph()
-    } else {
+    } else if (retries < INIT_RENDER_MAX_RETRIES) {
+      retries++
       setTimeout(tryRender, 60)
     }
   }
@@ -91,7 +93,7 @@ function setData(data) {
   }
 }
 
-// 获取纯数据（不含 id），用于持久化
+// 纯净导出：仅包含业务字段，用于持久化/提交。不导出 id、colorIndex、position、midBoneSeq、smallBoneSeq 等内部字段。
 function getData() {
   return {
     headLabel: headLabel.value,
@@ -377,8 +379,6 @@ function renderGraph() {
     calcDynamicMidLen,
   } = layout
 
-  const PAD = 40
-
   // 创建 X6 画布
   graph = new Graph({
     container: containerRef.value,
@@ -397,7 +397,6 @@ function renderGraph() {
   })
 
   // 鱼头文字尺寸随缩放联动
-  const FISH_SCALE_BASE = 1.6
   headFontSize.value = Math.round(14 * (FISH_SCALE / FISH_SCALE_BASE))
   headTextWidth.value = Math.round(72 * (FISH_SCALE / FISH_SCALE_BASE))
 
@@ -554,9 +553,8 @@ function renderGraph() {
       const vw = viewportRef.value.clientWidth
       const vh = viewportRef.value.clientHeight
 
-      const padding = 60
-      const scaleX = (vw - padding * 2) / canvasW
-      const scaleY = (vh - padding * 2) / canvasH
+      const scaleX = (vw - CENTER_PADDING * 2) / canvasW
+      const scaleY = (vh - CENTER_PADDING * 2) / canvasH
 
       let fitScale = Math.min(scaleX, scaleY, 1)
       fitScale = Math.max(fitScale, SCALE_MIN)

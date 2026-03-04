@@ -11,6 +11,10 @@ export const EMPTY_OFFSET_X = -250 // 空图时整体偏移
 export const BTN_SIZE = 20         // 加号可见尺寸
 export const BTN_HIT_SIZE = 34     // 加号点击热区尺寸
 export const CENTER_OFFSET_Y = 20  // 居中后向下补偿（正值=下移）
+export const PAD = 40              // 画布内边距（预留）
+export const FISH_SCALE_BASE = 1.6 // 鱼头文字缩放基准
+export const CENTER_PADDING = 60   // 居中计算时视口预留边距
+export const INIT_RENDER_MAX_RETRIES = 50   // init 时等待容器就绪的最大重试次数
 
 // 计算布局入口
 export function calculateLayout(fishData) {
