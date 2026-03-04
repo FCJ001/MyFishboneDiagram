@@ -10,6 +10,7 @@ export const CY = 350              // 主骨线 Y 坐标
 export const EMPTY_OFFSET_X = -250 // 空图时整体偏移
 export const BTN_SIZE = 20         // 加号可见尺寸
 export const BTN_HIT_SIZE = 34     // 加号点击热区尺寸
+export const CENTER_OFFSET_Y = 20  // 居中后向下补偿（正值=下移）
 
 // 计算布局入口
 export function calculateLayout(fishData) {

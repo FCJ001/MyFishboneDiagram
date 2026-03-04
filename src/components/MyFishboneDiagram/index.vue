@@ -3,7 +3,7 @@
 import { ref, reactive, onMounted, onBeforeUnmount, nextTick, computed } from 'vue'
 import { Graph } from '@antv/x6'
 import { IconZoomIn, IconZoomOut, IconOriginalSize } from '@arco-design/web-vue/es/icon'
-import { calculateLayout, LINE_CHARS, PAD_L, TAIL, EMPTY_OFFSET_X, BTN_HIT_SIZE } from './layout'
+import { calculateLayout, LINE_CHARS, PAD_L, TAIL, EMPTY_OFFSET_X, BTN_HIT_SIZE, CENTER_OFFSET_Y } from './layout'
 import { createDrawer, getBoneColor } from './drawer'
 
 // 事件
@@ -573,7 +573,7 @@ function renderGraph() {
       const scaledW = canvasW * scale.value
       const scaledH = canvasH * scale.value
       panX.value = Math.round((vw - scaledW) / 2 + offsetX)
-      panY.value = Math.round((vh - scaledH) / 2)
+      panY.value = Math.round((vh - scaledH) / 2 + CENTER_OFFSET_Y)
 
       if (isFirstRender.value) {
         baseScale.value = scale.value
@@ -596,15 +596,38 @@ function resetZoom() {
 function onConfirm() { emit('confirm') }
 function onCancel()  { emit('cancel') }
 
+// 响应式重绘：监听视口尺寸变化（Modal 放大缩小等场景）
+let resizeObserver = null
+let resizeTimer = null
+const RESIZE_DEBOUNCE = 200
+
+function onViewportResize() {
+  clearTimeout(resizeTimer)
+  resizeTimer = setTimeout(() => {
+    if (!viewportRef.value || isFirstRender.value) return
+    needsCenter = true
+    renderGraph()
+  }, RESIZE_DEBOUNCE)
+}
+
 // 生命周期
 onMounted(() => {
   window.addEventListener('pointermove', onPointerMove)
   window.addEventListener('pointerup', onPointerUp)
+  if (viewportRef.value) {
+    resizeObserver = new ResizeObserver(onViewportResize)
+    resizeObserver.observe(viewportRef.value)
+  }
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('pointermove', onPointerMove)
   window.removeEventListener('pointerup', onPointerUp)
+  clearTimeout(resizeTimer)
+  if (resizeObserver) {
+    resizeObserver.disconnect()
+    resizeObserver = null
+  }
 })
 </script>
 
@@ -764,18 +787,17 @@ onBeforeUnmount(() => {
           </a-popconfirm>
         </div>
       </div>
-    </div>
+      <!-- 缩放百分比 -->
+      <div class="scale-text">{{ displayScale }}%</div>
 
-    <!-- 缩放百分比 -->
-    <div class="scale-text">{{ displayScale }}%</div>
-
-    <!-- 缩放控件 -->
-    <div class="zoom-control">
-      <a-space size="medium">
-        <a-tooltip content="放大"><icon-zoom-in @click="zoomIn" /></a-tooltip>
-        <a-tooltip content="还原缩放"><icon-original-size @click="resetZoom" /></a-tooltip>
-        <a-tooltip content="缩小"><icon-zoom-out @click="zoomOut" /></a-tooltip>
-      </a-space>
+      <!-- 缩放控件 -->
+      <div class="zoom-control">
+        <a-space size="medium">
+          <a-tooltip content="放大"><icon-zoom-in @click="zoomIn" /></a-tooltip>
+          <a-tooltip content="还原缩放"><icon-original-size @click="resetZoom" /></a-tooltip>
+          <a-tooltip content="缩小"><icon-zoom-out @click="zoomOut" /></a-tooltip>
+        </a-space>
+      </div>
     </div>
 
     <!-- 底部操作栏 -->
@@ -822,14 +844,15 @@ onBeforeUnmount(() => {
   font-size: 13px;
   color: #1d2129;
   user-select: none;
+  pointer-events: none;
 }
 
 .zoom-control {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 6px 0;
-  flex-shrink: 0;
+  position: absolute;
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
 }
 .zoom-control :deep(.arco-space) {
   background: #fff;
