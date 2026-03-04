@@ -3,7 +3,7 @@
 import { ref, reactive, onMounted, onBeforeUnmount, nextTick, computed } from 'vue'
 import { Graph } from '@antv/x6'
 import { IconZoomIn, IconZoomOut, IconOriginalSize } from '@arco-design/web-vue/es/icon'
-import { calculateLayout, LINE_CHARS, PAD_L, TAIL, EMPTY_OFFSET_X, BTN_SIZE } from './layout'
+import { calculateLayout, LINE_CHARS, PAD_L, TAIL, EMPTY_OFFSET_X, BTN_HIT_SIZE } from './layout'
 import { createDrawer, getBoneColor } from './drawer'
 
 // 事件
@@ -50,28 +50,36 @@ async function init(dataOrPromise) {
 // 填充数据，自动生成 id 和 position
 function setData(data) {
   idSeq = 0
+  colorSeq = 0
+  bigBoneSeq = 0
   fishData.bigBones = []
   if (data.headLabel) headLabel.value = data.headLabel
   if (Array.isArray(data.bigBones)) {
     data.bigBones.forEach((bigItem, i) => {
+      bigBoneSeq++
       const big = {
         id: genId(),
-        label: bigItem.label || `大骨 ${i + 1}`,
+        colorIndex: colorSeq++,
+        label: bigItem.label || `大骨 ${bigBoneSeq}`,
         position: i % 2 === 0 ? 'top' : 'bottom',
+        midBoneSeq: 0,
         midBones: [],
       }
       if (Array.isArray(bigItem.midBones)) {
-        bigItem.midBones.forEach((midItem, j) => {
+        bigItem.midBones.forEach((midItem) => {
+          big.midBoneSeq++
           const mid = {
             id: genId(),
-            label: midItem.label || `中骨 ${j + 1}`,
+            label: midItem.label || `中骨 ${big.midBoneSeq}`,
+            smallBoneSeq: 0,
             smallBones: [],
           }
           if (Array.isArray(midItem.smallBones)) {
-            midItem.smallBones.forEach((smItem, k) => {
+            midItem.smallBones.forEach((smItem) => {
+              mid.smallBoneSeq++
               mid.smallBones.push({
                 id: genId(),
-                label: smItem.label || `小骨 ${k + 1}`,
+                label: smItem.label || `小骨 ${mid.smallBoneSeq}`,
               })
             })
           }
@@ -221,8 +229,9 @@ function getDisplayLabel(text) {
 // 鼠标离开覆盖层
 function onOverlayMouseLeave(ov) {
   if (hoveringOverlayId.value === ov.id) {
+    const changed = ov.boneRef.label !== originalLabel.value
     hoveringOverlayId.value = null
-    renderGraph()
+    if (changed) renderGraph()
   }
 }
 
@@ -255,6 +264,8 @@ function deleteBone(delInfo) {
 // ID 生成器
 let idSeq = 0
 const genId = () => `n_${++idSeq}`
+let colorSeq = 0
+let bigBoneSeq = 0
 const fishData = reactive({ bigBones: [] })
 
 // 鱼头标签
@@ -311,8 +322,10 @@ function addBigBone() {
   const n = fishData.bigBones.length
   fishData.bigBones.push({
     id: genId(),
-    label: `大骨 ${n + 1}`,
+    colorIndex: colorSeq++,
+    label: `大骨 ${++bigBoneSeq}`,
     position: n % 2 === 0 ? 'top' : 'bottom',
+    midBoneSeq: 0,
     midBones: [],
   })
   renderGraph()
@@ -322,10 +335,10 @@ function addBigBone() {
 function addMidBone(bigId) {
   const b = fishData.bigBones.find((x) => x.id === bigId)
   if (!b) return
-  const n = b.midBones.length
   b.midBones.unshift({
     id: genId(),
-    label: `中骨 ${n + 1}`,
+    label: `中骨 ${++b.midBoneSeq}`,
+    smallBoneSeq: 0,
     smallBones: [],
   })
   renderGraph()
@@ -337,10 +350,9 @@ function addSmallBone(bigId, midId) {
   if (!b) return
   const m = b.midBones.find((x) => x.id === midId)
   if (!m) return
-  const n = m.smallBones.length
   m.smallBones.push({
     id: genId(),
-    label: `小骨 ${n + 1}`,
+    label: `小骨 ${++m.smallBoneSeq}`,
   })
   renderGraph()
 }
@@ -415,15 +427,14 @@ function renderGraph() {
   // 绘制主骨线
   addEdge([mainLeft - TAIL_SVG_W * 0.3, cy], [mainRight + HEAD_SVG_W * 0.3, cy], '#00A68DFF', 4)
   // 新增大骨按钮
-  addBtn('btn_add_big', mainLeft + 15, cy - BTN_SIZE / 2, '#00A68D', '新增大骨', addBigBone, BTN_SIZE)
+  addBtn('btn_add_big', mainLeft + 15, cy - BTN_HIT_SIZE / 2, '#00A68D', '新增大骨', addBigBone)
 
   let btnSeq = 0
 
   // 遍历每根大骨
   for (const slot of slots) {
     const { b, x: bx } = slot
-    const bigIdx = fishData.bigBones.indexOf(b)
-    const boneColor = getBoneColor(bigIdx)
+    const boneColor = getBoneColor(b.colorIndex)
     const dir = b.position === 'top' ? -1 : 1
 
     // 大骨斜线
@@ -450,7 +461,7 @@ function renderGraph() {
     const btnT = btnDist / dynamicDiag
     const mbx = sx + (ex - sx) * btnT
     const mby = sy + (ey - sy) * btnT
-    addBtn(`btn_mid_${b.id}`, mbx - BTN_SIZE / 2, mby - BTN_SIZE / 2, boneColor, '新增中骨', () => addMidBone(bid), BTN_SIZE)
+    addBtn(`btn_mid_${b.id}`, mbx - BTN_HIT_SIZE / 2, mby - BTN_HIT_SIZE / 2, boneColor, '新增中骨', () => addMidBone(bid))
 
     // 遍历中骨
     let accumOffset = calcHeadMargin(b)
@@ -486,10 +497,9 @@ function renderGraph() {
       const smBtnCX = (ax + mex) / 2
       addBtn(
         `btn_sm_${++btnSeq}`,
-        smBtnCX - BTN_SIZE / 2, ay - BTN_SIZE / 2,
+        smBtnCX - BTN_HIT_SIZE / 2, ay - BTN_HIT_SIZE / 2,
         boneColor, '新增小骨',
         () => addSmallBone(bid, capMid),
-        BTN_SIZE,
       )
 
       // 绘制小骨
@@ -739,11 +749,19 @@ onBeforeUnmount(() => {
             }"
             :title="mode === 'view' ? '' : ov.boneRef.label"
           >{{ getDisplayLabel(ov.boneRef.label) }}</div>
-          <span
+          <a-popconfirm
             v-if="ov.delInfo && mode === 'edit'"
-            class="inline-edit-del"
-            @mousedown.prevent.stop="deleteBone(ov.delInfo)"
-          >&times;</span>
+            content="确定删除吗？"
+            type="warning"
+            position="tr"
+            popup-container="body"
+            @ok="deleteBone(ov.delInfo)"
+          >
+            <span
+              class="inline-edit-del"
+              @mousedown.prevent.stop
+            >&times;</span>
+          </a-popconfirm>
         </div>
       </div>
     </div>

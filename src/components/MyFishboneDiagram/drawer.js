@@ -1,4 +1,4 @@
-import { BTN_SIZE } from './layout'
+import { BTN_SIZE, BTN_HIT_SIZE } from './layout'
 
 // 创建绘图器
 export function createDrawer({ graph, mode, editOverlays, callbackMap, LINE_CHARS }) {
@@ -91,19 +91,31 @@ export function createDrawer({ graph, mode, editOverlays, callbackMap, LINE_CHAR
     })
   }
 
-  // 添加加号按钮（编辑模式可见）
-  function addBtn(id, x, y, color, tip, fn, size) {
+  // 添加加号按钮（编辑模式可见），热区大于可见按钮
+  function addBtn(id, x, y, color, tip, fn) {
     if (mode.value !== 'edit') return
-    const s = size || BTN_SIZE
+    const hit = BTN_HIT_SIZE
+    const vis = BTN_SIZE
+    const offset = (hit - vis) / 2
     callbackMap[id] = fn
     graph.addNode({
-      id, shape: 'rect', x, y, width: s, height: s,
+      id, shape: 'rect', x, y, width: hit, height: hit,
+      markup: [
+        { tagName: 'rect', selector: 'body' },
+        { tagName: 'rect', selector: 'btn' },
+        { tagName: 'text', selector: 'label' },
+      ],
       attrs: {
-        body: { fill: color, stroke: '#fff', strokeWidth: 1.5, rx: 4, ry: 4, cursor: 'pointer' },
+        body: { width: hit, height: hit, fill: 'transparent', stroke: 'none', cursor: 'pointer' },
+        btn: {
+          width: vis, height: vis, x: offset, y: offset,
+          fill: color, stroke: '#fff', strokeWidth: 1.5, rx: 4, ry: 4,
+          cursor: 'pointer', pointerEvents: 'none',
+        },
         label: {
-          text: '+', fill: '#fff',
-          fontSize: s === BTN_SIZE ? 16 : 13,
-          fontWeight: 'bold', cursor: 'pointer',
+          text: '+', fill: '#fff', fontSize: 16, fontWeight: 'bold',
+          cursor: 'pointer', refX: 0.5, refY: 0.5, textAnchor: 'middle', textVerticalAnchor: 'middle',
+          pointerEvents: 'none',
         },
       },
     })

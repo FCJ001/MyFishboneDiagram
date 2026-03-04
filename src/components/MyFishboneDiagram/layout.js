@@ -8,7 +8,8 @@ export const PAD_L = 70            // 画布左侧留白
 export const TAIL = 50             // 鱼尾到主骨线的距离
 export const CY = 350              // 主骨线 Y 坐标
 export const EMPTY_OFFSET_X = -250 // 空图时整体偏移
-export const BTN_SIZE = 20        // 加号按钮尺寸
+export const BTN_SIZE = 20         // 加号可见尺寸
+export const BTN_HIT_SIZE = 34     // 加号点击热区尺寸
 
 // 计算布局入口
 export function calculateLayout(fishData) {
