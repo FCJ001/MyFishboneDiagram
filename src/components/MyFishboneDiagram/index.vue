@@ -1,113 +1,19 @@
 <!-- 鱼骨图组件 -->
 <script setup>
-import { ref, reactive, onMounted, onBeforeUnmount, nextTick, computed } from 'vue'
+import { ref, reactive, onMounted, nextTick, computed } from 'vue'
 import { Graph } from '@antv/x6'
 import { IconZoomIn, IconZoomOut, IconOriginalSize } from '@arco-design/web-vue/es/icon'
 import { calculateLayout, LINE_CHARS, PAD_L, TAIL, EMPTY_OFFSET_X, BTN_HIT_SIZE, CENTER_OFFSET_Y, FISH_SCALE_BASE, CENTER_PADDING, INIT_RENDER_MAX_RETRIES } from './layout'
 import { createDrawer, getBoneColor } from './drawer'
+import { usePanZoom } from './usePanZoom'
+import { useOverlayEdit } from './useOverlayEdit'
+import { useViewportResize } from './useViewportResize'
 
 // 事件
 const emit = defineEmits(['confirm', 'cancel'])
 
 // 加载状态
 const loading = ref(false)
-
-// 显示缩放百分比
-const displayScale = computed(() => {
-  if (isFirstRender.value) return 100
-  return Math.round(scale.value / baseScale.value * 100)
-})
-
-// 初始化入口，外部调用 init(data) 渲染图表
-async function init(dataOrPromise) {
-  needsCenter = true
-  isFirstRender.value = true
-  // 支持 Promise 或 async 函数
-  if (dataOrPromise && (typeof dataOrPromise === 'function' || typeof dataOrPromise.then === 'function')) {
-    loading.value = true
-    try {
-      const result = typeof dataOrPromise === 'function' ? await dataOrPromise() : await dataOrPromise
-      if (result) setData(result)
-    } finally {
-      loading.value = false
-    }
-  } else if (dataOrPromise) {
-    setData(dataOrPromise)
-  }
-  // 等待 DOM 准备好后渲染，带重试上限避免死循环
-  let retries = 0
-  const tryRender = () => {
-    const c = containerRef.value
-    const vp = viewportRef.value
-    if (c && vp && vp.clientHeight > 0) {
-      renderGraph()
-    } else if (retries < INIT_RENDER_MAX_RETRIES) {
-      retries++
-      setTimeout(tryRender, 60)
-    }
-  }
-  nextTick(tryRender)
-}
-
-// 填充数据，自动生成 id 和 position
-function setData(data) {
-  idSeq = 0
-  colorSeq = 0
-  bigBoneSeq = 0
-  fishData.bigBones = []
-  if (data.headLabel) headLabel.value = data.headLabel
-  if (Array.isArray(data.bigBones)) {
-    data.bigBones.forEach((bigItem, i) => {
-      bigBoneSeq++
-      const big = {
-        id: genId(),
-        colorIndex: colorSeq++,
-        label: bigItem.label || `大骨 ${bigBoneSeq}`,
-        position: i % 2 === 0 ? 'top' : 'bottom',
-        midBoneSeq: 0,
-        midBones: [],
-      }
-      if (Array.isArray(bigItem.midBones)) {
-        bigItem.midBones.forEach((midItem) => {
-          big.midBoneSeq++
-          const mid = {
-            id: genId(),
-            label: midItem.label || `中骨 ${big.midBoneSeq}`,
-            smallBoneSeq: 0,
-            smallBones: [],
-          }
-          if (Array.isArray(midItem.smallBones)) {
-            midItem.smallBones.forEach((smItem) => {
-              mid.smallBoneSeq++
-              mid.smallBones.push({
-                id: genId(),
-                label: smItem.label || `小骨 ${mid.smallBoneSeq}`,
-              })
-            })
-          }
-          big.midBones.push(mid)
-        })
-      }
-      fishData.bigBones.push(big)
-    })
-  }
-}
-
-// 纯净导出：仅包含业务字段，用于持久化/提交。不导出 id、colorIndex、position、midBoneSeq、smallBoneSeq 等内部字段。
-function getData() {
-  return {
-    headLabel: headLabel.value,
-    bigBones: fishData.bigBones.map(b => ({
-      label: b.label,
-      midBones: b.midBones.map(m => ({
-        label: m.label,
-        smallBones: m.smallBones.map(s => ({ label: s.label })),
-      })),
-    })),
-  }
-}
-
-defineExpose({ init, setData, getData })
 
 // DOM 引用
 const containerRef = ref(null)
@@ -117,151 +23,40 @@ let graph = null
 let needsCenter = true
 const callbackMap = {}
 
-// 画布拖拽平移
-const panX = ref(0)
-const panY = ref(0)
-const scale = ref(1)
-const baseScale = ref(1)
-const isFirstRender = ref(true)
-const SCALE_MIN = 0.001
-const SCALE_MAX = 1000
-let isPanning = false
-let panStartX = 0
-let panStartY = 0
-let panOriginX = 0
-let panOriginY = 0
-let didDrag = false
-
-// 指针按下，开始拖拽
-function onPointerDown(e) {
-  if (e.target.closest('.inline-edit-wrap') || e.target.closest('.fish-head-label')) return
-  isPanning = true
-  didDrag = false
-  panStartX = e.clientX
-  panStartY = e.clientY
-  panOriginX = panX.value
-  panOriginY = panY.value
-  viewportRef.value.style.cursor = 'grabbing'
-}
-
-// 指针移动，拖拽画布
-function onPointerMove(e) {
-  if (!isPanning) return
-  const dx = e.clientX - panStartX
-  const dy = e.clientY - panStartY
-  if (Math.abs(dx) > 3 || Math.abs(dy) > 3) didDrag = true
-  panX.value = panOriginX + dx
-  panY.value = panOriginY + dy
-}
-
-// 指针抬起，结束拖拽
-function onPointerUp() {
-  if (!isPanning) return
-  isPanning = false
-  if (viewportRef.value) viewportRef.value.style.cursor = ''
-}
-
-// 滚轮缩放，以鼠标位置为中心
-function onWheel(e) {
-  e.preventDefault()
-  const rect = viewportRef.value.getBoundingClientRect()
-  const mx = e.clientX - rect.left
-  const my = e.clientY - rect.top
-  const oldScale = scale.value
-  const delta = e.deltaY > 0 ? -0.08 : 0.08
-  const newScale = Math.min(SCALE_MAX, Math.max(SCALE_MIN, oldScale + delta))
-  panX.value = mx - (mx - panX.value) * (newScale / oldScale)
-  panY.value = my - (my - panY.value) * (newScale / oldScale)
-  scale.value = newScale
-}
-
 // 模式：编辑/详情
 const mode = defineModel({ default: 'edit' })
 const editOverlays = ref([])
-const MAX_CHARS = 20
 
-// 骨骼编辑覆盖层
-const hoveringOverlayId = ref(null)
-const originalLabel = ref('')
+// 基础缩放比
+const baseScale = ref(1)
+const isFirstRender = ref(true)
 
-// 覆盖层失焦，值变化时重绘
-function onOverlayBlur() {
-  const currentLabel = hoveringOverlayId.value
-    ? editOverlays.value.find(ov => ov.id === hoveringOverlayId.value)?.boneRef.label
-    : ''
-  if (currentLabel !== originalLabel.value) {
-    renderGraph()
-  }
-  hoveringOverlayId.value = null
-}
+// --- composables ---
+const {
+  panX, panY, scale, displayScale,
+  SCALE_MIN,
+  onPointerDown, onWheel,
+  zoomIn, zoomOut, getDidDrag,
+} = usePanZoom({ viewportRef, isFirstRender, baseScale })
 
-// 输入框输入
-function onOverlayInput(e, ov) {
-  const val = e.target.value
-  if (val.length > MAX_CHARS) {
-    e.target.value = val.slice(0, MAX_CHARS)
-    ov.boneRef.label = e.target.value
-  } else {
-    ov.boneRef.label = val
-  }
-}
+const {
+  MAX_CHARS,
+  hoveringOverlayId,
+  onOverlayBlur,
+  onOverlayInput,
+  onOverlayMouseEnter,
+  onOverlayMouseLeave,
+  getDisplayLabel,
+  deleteBone: _deleteBone,
+} = useOverlayEdit({ mode, editOverlays, renderGraph })
 
-// 鼠标进入覆盖层
-function onOverlayMouseEnter(ov) {
-  if (mode.value === 'edit') {
-    originalLabel.value = ov.boneRef.label
-    hoveringOverlayId.value = ov.id
-    nextTick(() => {
-      const el = document.querySelector(`#edit-input-${ov.id}`)
-      if (el) el.focus()
-    })
-  }
-}
-
-// 获取显示标签，超过10字换行，最多20字
-function getDisplayLabel(text) {
-  let label = text || ''
-  if (label.length > 20) label = label.slice(0, 20)
-  if ((mode.value === 'view' || mode.value === 'edit') && label.length > 10) {
-    return label.slice(0, 10) + '\n' + label.slice(10)
-  }
-  return label
-}
-
-// 鼠标离开覆盖层
-function onOverlayMouseLeave(ov) {
-  if (hoveringOverlayId.value === ov.id) {
-    const changed = ov.boneRef.label !== originalLabel.value
-    hoveringOverlayId.value = null
-    if (changed) renderGraph()
-  }
-}
-
-// 删除骨骼
 function deleteBone(delInfo) {
-  if (!delInfo) return
-  const { type, bigId, midId, smId } = delInfo
-  if (type === 'big') {
-    const idx = fishData.bigBones.findIndex((b) => b.id === bigId)
-    if (idx >= 0) fishData.bigBones.splice(idx, 1)
-    fishData.bigBones.forEach((b, i) => {
-      b.position = i % 2 === 0 ? 'top' : 'bottom'
-    })
-  } else if (type === 'mid') {
-    const big = fishData.bigBones.find((b) => b.id === bigId)
-    if (!big) return
-    const idx = big.midBones.findIndex((m) => m.id === midId)
-    if (idx >= 0) big.midBones.splice(idx, 1)
-  } else if (type === 'small') {
-    const big = fishData.bigBones.find((b) => b.id === bigId)
-    if (!big) return
-    const mid = big.midBones.find((m) => m.id === midId)
-    if (!mid) return
-    const idx = mid.smallBones.findIndex((s) => s.id === smId)
-    if (idx >= 0) mid.smallBones.splice(idx, 1)
-  }
-  renderGraph()
+  _deleteBone(delInfo, fishData)
 }
+
+function setNeedsCenter() { needsCenter = true }
+
+useViewportResize({ viewportRef, isFirstRender, renderGraph, setNeedsCenter })
 
 // ID 生成器
 let idSeq = 0
@@ -277,7 +72,6 @@ const headInputRef = ref(null)
 const headFontSize = ref(14)
 const headTextWidth = ref(72)
 
-// 鱼头显示文本
 const displayHeadLabel = computed(() => {
   let text = headLabel.value
   if (text.length > 20) text = text.slice(0, 20)
@@ -292,7 +86,6 @@ const headPos = reactive({ x: 0, y: 0, w: 0, h: 0 })
 const tailPos = reactive({ x: 0, y: 0, w: 0, h: 0 })
 const originalHeadLabel = ref('')
 
-// 鼠标进入鱼头
 function onHeadMouseEnter() {
   if (mode.value !== 'edit') return
   originalHeadLabel.value = headLabel.value
@@ -300,7 +93,6 @@ function onHeadMouseEnter() {
   nextTick(() => { headInputRef.value?.focus() })
 }
 
-// 鼠标离开鱼头
 function onHeadMouseLeave() {
   if (headLabel.value !== originalHeadLabel.value) {
     renderGraph()
@@ -308,7 +100,6 @@ function onHeadMouseLeave() {
   headHovering.value = false
 }
 
-// 鱼头输入
 function onHeadInput(e) {
   const val = e.target.value
   if (val.length > MAX_CHARS) {
@@ -359,12 +150,25 @@ function addSmallBone(bigId, midId) {
   renderGraph()
 }
 
-// 核心渲染函数
+// --- renderGraph 节流：用 rAF 合并同一帧内的多次调用 ---
+let renderRafId = null
+
 function renderGraph() {
+  if (renderRafId !== null) return
+  renderRafId = requestAnimationFrame(() => {
+    renderRafId = null
+    _renderGraph()
+  })
+}
+
+// 核心渲染函数
+function _renderGraph() {
   if (!viewportRef.value) return
 
   // 清理旧画布
-  if (graph) graph.dispose()
+  if (graph) {
+    try { graph.dispose() } catch (_) { /* 已 dispose 时忽略 */ }
+  }
   containerRef.value.innerHTML = ''
   Object.keys(callbackMap).forEach((k) => delete callbackMap[k])
   editOverlays.value = []
@@ -402,7 +206,7 @@ function renderGraph() {
 
   // 节点点击事件
   graph.on('node:click', ({ node }) => {
-    if (didDrag) return
+    if (getDidDrag()) return
     const fn = callbackMap[node.id]
     if (fn) fn()
   })
@@ -510,7 +314,6 @@ function renderGraph() {
         const smBoxRightX = lineOriginX - SM_LINK_LEN
 
         if (smCount === 1) {
-          // 单个小骨直线连接
           const sm = m.smallBones[0]
           const sw = smBoxW(sm), sh = smBoxH(sm)
           const smBoxCenterY = smStartY + sh / 2
@@ -521,7 +324,6 @@ function renderGraph() {
             sm, { type: 'small', bigId: b.id, midId: m.id, smId: sm.id },
           )
         } else {
-          // 多个小骨弧线连接
           const branchX = lineOriginX - 12
           addEdge([lineOriginX, ay], [branchX, ay], boneColor, 1)
 
@@ -584,49 +386,105 @@ function renderGraph() {
   }
 }
 
-// 缩放操作
-function zoomIn()    { scale.value = Math.min(SCALE_MAX * baseScale.value, scale.value + 0.1 * baseScale.value) }
-function zoomOut()   { scale.value = Math.max(SCALE_MIN * baseScale.value, scale.value - 0.1 * baseScale.value) }
+// 缩放还原
 function resetZoom() {
   if (isFirstRender.value) return
-  needsCenter = true; scale.value = baseScale.value; renderGraph()
+  needsCenter = true
+  scale.value = baseScale.value
+  renderGraph()
 }
+
 function onConfirm() { emit('confirm') }
 function onCancel()  { emit('cancel') }
 
-// 响应式重绘：监听视口尺寸变化（Modal 放大缩小等场景）
-let resizeObserver = null
-let resizeTimer = null
-const RESIZE_DEBOUNCE = 200
-
-function onViewportResize() {
-  clearTimeout(resizeTimer)
-  resizeTimer = setTimeout(() => {
-    if (!viewportRef.value || isFirstRender.value) return
-    needsCenter = true
-    renderGraph()
-  }, RESIZE_DEBOUNCE)
+// 初始化入口
+async function init(dataOrPromise) {
+  needsCenter = true
+  isFirstRender.value = true
+  if (dataOrPromise && (typeof dataOrPromise === 'function' || typeof dataOrPromise.then === 'function')) {
+    loading.value = true
+    try {
+      const result = typeof dataOrPromise === 'function' ? await dataOrPromise() : await dataOrPromise
+      if (result) setData(result)
+    } finally {
+      loading.value = false
+    }
+  } else if (dataOrPromise) {
+    setData(dataOrPromise)
+  }
+  let retries = 0
+  const tryRender = () => {
+    const c = containerRef.value
+    const vp = viewportRef.value
+    if (c && vp && vp.clientHeight > 0) {
+      renderGraph()
+    } else if (retries < INIT_RENDER_MAX_RETRIES) {
+      retries++
+      setTimeout(tryRender, 60)
+    }
+  }
+  nextTick(tryRender)
 }
 
-// 生命周期
-onMounted(() => {
-  window.addEventListener('pointermove', onPointerMove)
-  window.addEventListener('pointerup', onPointerUp)
-  if (viewportRef.value) {
-    resizeObserver = new ResizeObserver(onViewportResize)
-    resizeObserver.observe(viewportRef.value)
+// 填充数据
+function setData(data) {
+  idSeq = 0
+  colorSeq = 0
+  bigBoneSeq = 0
+  fishData.bigBones = []
+  if (data.headLabel) headLabel.value = data.headLabel
+  if (Array.isArray(data.bigBones)) {
+    data.bigBones.forEach((bigItem, i) => {
+      bigBoneSeq++
+      const big = {
+        id: genId(),
+        colorIndex: colorSeq++,
+        label: bigItem.label || `大骨 ${bigBoneSeq}`,
+        position: i % 2 === 0 ? 'top' : 'bottom',
+        midBoneSeq: 0,
+        midBones: [],
+      }
+      if (Array.isArray(bigItem.midBones)) {
+        bigItem.midBones.forEach((midItem) => {
+          big.midBoneSeq++
+          const mid = {
+            id: genId(),
+            label: midItem.label || `中骨 ${big.midBoneSeq}`,
+            smallBoneSeq: 0,
+            smallBones: [],
+          }
+          if (Array.isArray(midItem.smallBones)) {
+            midItem.smallBones.forEach((smItem) => {
+              mid.smallBoneSeq++
+              mid.smallBones.push({
+                id: genId(),
+                label: smItem.label || `小骨 ${mid.smallBoneSeq}`,
+              })
+            })
+          }
+          big.midBones.push(mid)
+        })
+      }
+      fishData.bigBones.push(big)
+    })
   }
-})
+}
 
-onBeforeUnmount(() => {
-  window.removeEventListener('pointermove', onPointerMove)
-  window.removeEventListener('pointerup', onPointerUp)
-  clearTimeout(resizeTimer)
-  if (resizeObserver) {
-    resizeObserver.disconnect()
-    resizeObserver = null
+// 纯净导出：仅包含业务字段，用于持久化/提交。不导出 id、colorIndex、position、midBoneSeq、smallBoneSeq 等内部字段。
+function getData() {
+  return {
+    headLabel: headLabel.value,
+    bigBones: fishData.bigBones.map(b => ({
+      label: b.label,
+      midBones: b.midBones.map(m => ({
+        label: m.label,
+        smallBones: m.smallBones.map(s => ({ label: s.label })),
+      })),
+    })),
   }
-})
+}
+
+defineExpose({ init, setData, getData })
 </script>
 
 <template>
