@@ -5,6 +5,15 @@ const MAX_CHARS = 20
 export function useOverlayEdit({ mode, editOverlays, renderGraph }) {
   const hoveringOverlayId = ref(null)
   const originalLabel = ref('')
+  const visibleDelId = ref(null)
+
+  function showDelConfirm(ovId) {
+    visibleDelId.value = ovId
+  }
+
+  function hideDelConfirm() {
+    visibleDelId.value = null
+  }
 
   function onOverlayBlur() {
     // blur 不主动清 hoveringOverlayId，交给 mouseLeave 统一处理
@@ -77,6 +86,9 @@ export function useOverlayEdit({ mode, editOverlays, renderGraph }) {
   return {
     MAX_CHARS,
     hoveringOverlayId,
+    visibleDelId,
+    showDelConfirm,
+    hideDelConfirm,
     onOverlayBlur,
     onOverlayInput,
     onOverlayMouseEnter,

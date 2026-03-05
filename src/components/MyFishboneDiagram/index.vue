@@ -42,6 +42,9 @@ const {
 const {
   MAX_CHARS,
   hoveringOverlayId,
+  visibleDelId,
+  showDelConfirm,
+  hideDelConfirm,
   onOverlayBlur,
   onOverlayInput,
   onOverlayMouseEnter,
@@ -51,6 +54,7 @@ const {
 } = useOverlayEdit({ mode, editOverlays, renderGraph })
 
 function deleteBone(delInfo) {
+  hideDelConfirm()
   _deleteBone(delInfo, fishData)
 }
 
@@ -634,11 +638,14 @@ defineExpose({ init, setData, getData })
             type="warning"
             position="tr"
             popup-container="body"
+            :popup-visible="visibleDelId === ov.id"
             @ok="deleteBone(ov.delInfo)"
+            @cancel="hideDelConfirm"
           >
             <span
               class="inline-edit-del"
               @mousedown.prevent.stop
+              @click.stop="showDelConfirm(ov.id)"
             >&times;</span>
           </a-popconfirm>
         </div>

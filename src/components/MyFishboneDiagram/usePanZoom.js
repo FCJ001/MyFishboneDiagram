@@ -58,12 +58,25 @@ export function usePanZoom({ viewportRef, isFirstRender, baseScale }) {
     scale.value = newScale
   }
 
+  function zoomAroundCenter(delta) {
+    if (!viewportRef.value) return
+    const vw = viewportRef.value.clientWidth
+    const vh = viewportRef.value.clientHeight
+    const cx = vw / 2
+    const cy = vh / 2
+    const oldScale = scale.value
+    const newScale = Math.min(SCALE_MAX * baseScale.value, Math.max(SCALE_MIN * baseScale.value, oldScale + delta))
+    panX.value = cx - (cx - panX.value) * (newScale / oldScale)
+    panY.value = cy - (cy - panY.value) * (newScale / oldScale)
+    scale.value = newScale
+  }
+
   function zoomIn() {
-    scale.value = Math.min(SCALE_MAX * baseScale.value, scale.value + 0.1 * baseScale.value)
+    zoomAroundCenter(0.1 * baseScale.value)
   }
 
   function zoomOut() {
-    scale.value = Math.max(SCALE_MIN * baseScale.value, scale.value - 0.1 * baseScale.value)
+    zoomAroundCenter(-0.1 * baseScale.value)
   }
 
   function getDidDrag() { return didDrag }
